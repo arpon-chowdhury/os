@@ -14,4 +14,14 @@ struct kernel_framebuffer {
 
 /* Returns false without writing any pixels if validation fails. */
 bool framebuffer_show_welcome(const struct kernel_framebuffer *framebuffer);
+/* Validated, clipped terminal drawing primitives; RGB colors use 0xRRGGBB. */
+bool framebuffer_valid(const struct kernel_framebuffer *fb);
+void framebuffer_fill(const struct kernel_framebuffer *fb, uint64_t x, uint64_t y,
+                      uint64_t width, uint64_t height, uint32_t color);
+void framebuffer_cell(const struct kernel_framebuffer *fb, unsigned int col,
+                      unsigned int row, char ch, bool cursor);
+/* Foreground-only pointer overlay; writes beneath it update saved pixels. */
+bool framebuffer_pointer_init(const struct kernel_framebuffer *fb);
+void framebuffer_pointer_move(int16_t dx, int16_t dy);
+void framebuffer_pointer_position(uint64_t *x, uint64_t *y);
 #endif

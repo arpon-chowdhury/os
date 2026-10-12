@@ -146,7 +146,7 @@ ON.: framebuffer welcome screen ready.
 The kernel renders a simple welcome screen and then idles between PIT interrupts. `make run` is
 headless by default; use `make run DISPLAY=cocoa` for a macOS display window.
 Basic fatal CPU exceptions and legacy PIC/PIT IRQ handlers are implemented;
-physical page allocation is also implemented. No scheduler, keyboard, heap,
+physical page allocation is also implemented. No scheduler, keyboard,
 terminal, or desktop is implemented.
 The QEMU debug port is not a real-hardware output interface.
 
@@ -333,7 +333,7 @@ scheduling, and user space remain unimplemented.
 See [the exception guide](exceptions.md) for GDT/TSS/IDT layouts, fatal handling,
 and the nine controlled CPU-fault cases. `make verify-exceptions` runs 18 tests
 across BIOS and UEFI, with isolated images beneath `build/exceptions/`. Default
-builds use injection mode 0; object paths now include `obj/mode-0-0-0/` (or the
+builds use injection mode 0; object paths now include `obj/mode-0-0-0-0/` (or the
 selected test mode). Mode changes force re-linking to prevent fault injection
 from leaking into a normal build when an output directory is reused.
 All 12 fault tests and the normal boot/screen regressions passed on 2026-10-13.
@@ -350,5 +350,15 @@ See [the memory guide](memory.md). `make test-memory` runs sanitized native
 allocator tests. `make verify-memory` tests exhaustion/restoration and missing
 map/HHDM fallbacks under BIOS and UEFI at 128 MiB and 256 MiB. Normal images use
 `PMM_TEST=0`; test images use isolated build directories. Object modes encode
-exception, PMM, and VMM flags, and the `build-mode` record forces a link when
+exception, PMM, VMM, and heap flags, and the `build-mode` record forces a link when
 any of these changes. No test reclaims firmware or bootloader memory.
+
+## Kernel heap builds and tests
+
+See [the heap guide](heap.md). `make test-heap` runs sanitized native tests;
+`make verify-heap` runs stress and partial-provisioning rollback under BIOS/UEFI.
+Normal builds use `HEAP_TEST=0`; injected modes require isolated build directories.
+
+## Foreground window checks
+
+`make test-windows` runs native ASan/UBSan geometry, lifecycle, capacity and dirty-composition tests. `make verify-windows` boots BIOS and UEFI, exercises independent desktop windows, and captures PNGs under `$(BUILD)/windows/{bios,uefi}`. See [window management](window-management.md) for controls, ownership and limitations.

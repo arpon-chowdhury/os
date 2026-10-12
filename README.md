@@ -3,6 +3,10 @@
 The display name is **ON.**; filenames, C identifiers, and shared headers use
 `on` / `ON`. The boot image is `build/on.iso` with ISO volume label `ON`.
 
+Built-in features use standalone names: **Flow**, **Pulse**, **Spaces**,
+**Studio**, and **Control**. Use these names consistently in GUI labels, menus,
+documentation, and development plans; the operating system remains **ON.**
+
 ON. is a general-purpose PC operating system written from scratch in C with
 minimal assembly. Intel and AMD x86-64 computers are the first target, followed
 by ARM64 PCs and potentially Apple Silicon Macs. ON. is not an Apple-only OS.
@@ -22,7 +26,8 @@ system tick counter; see the [interrupt guide](docs/interrupts.md). Physical mem
 management allocates protected 4 KiB frames from the Limine map; see the
 [memory guide](docs/memory.md). Four-level x86-64 virtual memory provides translation,
 mapping, permissions, and TLB invalidation while preserving boot mappings; see the
-[virtual memory guide](docs/virtual-memory.md). Scheduling, keyboard input, other
+[virtual memory guide](docs/virtual-memory.md). The [kernel heap](docs/heap.md)
+provides safe allocation, alignment, coalescing, and statistics. Scheduling, keyboard input, other
 drivers, and user space are future work.
 
 ## Build and run
@@ -41,6 +46,8 @@ make run           # Requires qemu-system-x86_64; type quit in its monitor to ex
 make verify-boot   # Bounded BIOS handoff and welcome-rendering check
 make verify-framebuffer # Save the QEMU screen and test the no-VGA fallback
 make test-framebuffer   # Native renderer memory safety tests
+make test-heap          # Sanitized heap safety and stress tests
+make verify-heap        # BIOS/UEFI heap stress and rollback tests
 make test-memory        # Native physical allocator safety tests
 make verify-virtual     # BIOS/UEFI virtual memory and rollback tests
 make verify-memory      # Controlled BIOS/UEFI allocation and fallback tests
@@ -137,7 +144,7 @@ Git manages repository metadata in `.git/`.
 3. **First boot validation (verified):** ELF segments, ISO, BIOS boot handoff, and
    diagnostic output passed under QEMU TCG on Apple M2.
 4. **CPU and memory foundation (current):** fatal exceptions, legacy PIC/PIT interrupts,
-   physical page allocation, and virtual memory management are implemented.
+   physical page allocation, virtual memory management, and a kernel heap are implemented.
 5. **Drivers and libraries:** foundational device support and freestanding routines.
 6. **Tasks and services:** scheduling, process boundaries, system calls, and storage.
 7. **x86-64 PC hardening:** automated tests, reproducible builds, interface
@@ -146,3 +153,129 @@ Git manages repository metadata in `.git/`.
    and supported PC platform services after the x86-64 foundation is established.
 9. **Apple Silicon evaluation (potential):** assess a separate platform port;
    ARM64 CPU support alone does not provide Apple hardware support.
+
+## PS/2 keyboard
+
+The x86-64 boot CPU initializes the first PS/2 port and handles IRQ1 with
+translated scan-code set 1 and a US keyboard layout. Both Shift keys, key
+release, Enter (including keypad Enter), and Backspace are supported. The idle
+loop consumes events and reports printable input and control keys to debugcon
+and COM1, and forwards input to the interactive framebuffer terminal.
+
+`keyboard_poll()` returns make/break events from a 64-event FIFO and preserves
+the caller's interrupt state. Overflow drops new events and increments
+`keyboard_dropped_events()`; modifier decoding continues even when full.
+This queue supports the single boot CPU, with no allocation or output in IRQ1.
+Initialization waits and IRQ work are bounded; failed initialization masks IRQ1.
+Caps Lock, other layouts, USB keyboards, and SMP consumers are not implemented.
+
+Run `make test-keyboard` for sanitized decoder/queue tests and
+`make verify-keyboard` for real BIOS and UEFI QEMU key injection, alongside
+existing framebuffer, memory, heap, and timer assertions.
+
+## Interactive terminal
+
+After boot initialization, the welcome screen becomes a framebuffer terminal
+with a blinking underline cursor, line wrapping, and upward scrolling. Type a
+command and press Enter; Backspace edits the current line without deleting the
+`on> ` prompt. Input uses the PS/2 US layout, including Shift.
+
+- `help`: list commands.
+- `clear`: clear the screen and start a fresh prompt.
+- `echo TEXT`: print text.
+- `version`: show the kernel version.
+- `ticks`: show the PIT tick count (approximately 100 per second).
+- `mem`: show physical-frame allocation statistics.
+- `heap`: show heap allocation statistics.
+- `graphics`: display the Phase 1 graphics demo; Escape returns to the terminal.
+- `ui`: open the retained UI scene; Escape restores the terminal.
+
+Run `make run DISPLAY=cocoa` or `make run-uefi DISPLAY=cocoa` to use it.
+`make test-terminal` runs sanitized command, input-boundary, cursor, wrapping,
+and scrolling checks. `make verify-terminal` injects commands under BIOS and
+UEFI and saves display captures beneath `build/terminal/`.
+
+The terminal uses static storage (up to 160 columns by 64 rows) and a bounded
+255-character input line, further limited to fit the visible rows. It needs no
+heap allocation. IRQ handlers only enqueue input; foreground code renders and
+executes commands with interrupts enabled. Unsupported or missing framebuffers
+retain the existing serial/debug output. History, navigation editing, command
+pipelines, and ANSI escape sequences are not implemented.
+
+## PS/2 mouse
+
+The first boot CPU initializes the second PS/2 port in standard three-byte
+stream mode and unmasks IRQ12 plus the PIC cascade. Both PS/2 IRQ handlers drain
+the shared controller buffer and route keyboard/mouse bytes using its AUX bit.
+Initialization preserves keyboard translation and IRQ1 configuration; waits,
+command retries, and IRQ work are bounded. A failed mouse initialization masks
+IRQ12 and retains the keyboard and other services.
+
+Signed relative movement drives a white arrow, clamped to the framebuffer
+edges, with PS/2 upward motion converted to screen coordinates. Left/right
+presses and releases are detected and reported to debugcon and COM1. The pointer
+saves the pixels underneath it; terminal drawing updates that saved background,
+so typing, clearing, scrolling, and the blinking text cursor remain intact.
+Drawing and reporting happen in foreground code, never in IRQ12.
+
+`make test-mouse` runs sanitized packet and queue checks. `make verify-mouse`
+tests BIOS and UEFI QEMU motion in both directions, individual/simultaneous
+left/right buttons and releases, edge clamping, keyboard commands while the
+pointer covers text, and pixel restoration. Captures and logs are under
+`build/mouse/`. Sanitized framebuffer tests also cover pointer clipping, pitch
+padding, and drawing beneath the pointer.
+
+Limitations: standard PS/2 mice only; no USB tablet, wheel, extra-button,
+acceleration, text selection, or clickable terminal commands. The fixed
+64-event queue supports the single boot CPU and drops newest events when full;
+`mouse_dropped_events()` reports overflow. Motion overflow flags suppress the
+invalid axis while retaining button flags. Packet alignment uses the mandatory
+header bit and controller errors discard partial packets; arbitrary lost bytes
+cannot always be recovered unambiguously. Real PC mouse hardware has not been
+tested. A missing/unsupported framebuffer keeps mouse events in debug output
+without a visible cursor. No macOS system settings are changed.
+
+## Phase 1 graphics foundation
+
+Type `graphics` at the terminal prompt to display the original ON. drawing demo;
+press Escape to redraw and resume the terminal. Mouse movement and PIT delivery
+continue in the demo. It is a static scene, with no window manager or clickable
+dock. Flow, Pulse, Spaces, Studio, and Light/Dark/Auto theme behavior are future
+designs described in [the GUI specification](docs/gui-design.md).
+
+`kernel/include/graphics.h` exposes a framebuffer context with signed-coordinate
+pixels, clipped fills/outlines/lines, clear, and scaled original bitmap text.
+The backend respects pitch and nonoverlapping eight-bit RGB masks in validated
+32-bit framebuffers, including unaligned pitch/address. Unsupported modes fail
+without drawing. It uses no heap allocation or dependencies and preserves the
+mouse pointer background. `kernel/include/font.h` shares the original ASCII
+font between graphics and terminal rendering.
+
+Run `make test-graphics` for sanitized primitive tests, or `make verify-graphics`
+for BIOS/UEFI pixel verification, display captures, and keyboard return to the
+terminal. Captures live in `build/graphics/{bios,uefi}/graphics-demo.png`.
+Direct front-buffer rendering can tear; there is no GPU acceleration, alpha
+compositing, Unicode font engine, automatic theme schedule, or real-hardware
+validation yet.
+
+## Retained UI foundation
+
+Type `ui` to open retained Control and Canvas sample windows with a centered
+floating dock. Click a window to focus it, drag its title bar to move it, and
+click buttons to activate them. Control selects Light, Dark, or Auto. Tab and
+Shift-Tab select controls; Enter/Space activate; F6 cycles windows. Escape restores
+the terminal. Dock entries remain Flow, Pulse, Spaces, Studio and Control.
+
+Opaque surfaces are recomposited only within clipped dirty regions. Shared
+theme tokens apply to windows, buttons, dock and top bar. Auto adapts to local
+time supplied by a future clock service; the current demo explicitly falls back
+to Dark because configured local civil time is unavailable. The desktop can separately show guest RTC firmware time. No host settings are read or
+changed, and no applications or multitasking are introduced.
+
+Run `make test-ui` for sanitized state/compositing checks and `make verify-ui`
+for BIOS/UEFI mouse, keyboard, palette and terminal-restoration tests.
+See [ui-foundation.md](docs/ui-foundation.md) for APIs, limits and test details.
+
+Interactive shell: type `desktop` in the terminal. See [desktop controls and limitations](docs/desktop.md). Run `make verify-desktop` for BIOS/UEFI interaction checks and screenshots.
+
+Independent foreground windows: see [window management](docs/window-management.md). Run `make test-windows` and `make verify-windows` for sanitizer and BIOS/UEFI lifecycle/geometry tests.

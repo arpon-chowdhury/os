@@ -2,6 +2,9 @@
 #include "arch.h"
 #include "interrupts.h"
 #include "io.h"
+#include "keyboard.h"
+#include "terminal.h"
+#include "mouse.h"
 
 #define PIC_MASTER 0x20
 #define PIC_SLAVE 0xa0
@@ -100,11 +103,40 @@ __attribute__((noreturn)) void arch_idle(void) {
     for (;;) {
         /* STI's interrupt shadow makes the enable-and-sleep sequence atomic. */
         __asm__ volatile ("sti; hlt; cli" : : : "memory");
+        /* Foreground drawing and commands must not stall IRQ1 or the PIT. */
+        __asm__ volatile ("sti" : : : "memory");
+        struct keyboard_event event;
+        while (keyboard_poll(&event)) {
+            terminal_handle_event(&event);
+            if (event.pressed && event.character) {
+                char text[2] = {event.character, 0};
+                arch_debug_puts("ON.: key ");
+                if (event.character == '\n') arch_debug_puts("ENTER");
+                else if (event.character == '\b') arch_debug_puts("BACKSPACE");
+                else arch_debug_puts(text);
+                arch_debug_puts("\n");
+            }
+        }
+        struct mouse_event mouse;
+        while (mouse_poll(&mouse)) {
+            framebuffer_pointer_move(mouse.dx, mouse.dy);
+            terminal_mouse(&mouse);
+            /* Foreground diagnostics also make QEMU input tests observable. */
+            arch_debug_puts("ON.: mouse ");
+            if (mouse.dx > 0) arch_debug_puts("X+ ");
+            else if (mouse.dx < 0) arch_debug_puts("X- ");
+            if (mouse.dy > 0) arch_debug_puts("Y+ ");
+            else if (mouse.dy < 0) arch_debug_puts("Y- ");
+            arch_debug_puts(mouse.left ? "L1 " : "L0 ");
+            arch_debug_puts(mouse.right ? "R1\n" : "R0\n");
+        }
         uint64_t ticks = arch_system_ticks();
+        terminal_tick(ticks);
         if (reports < 2 && ticks >= (uint64_t)(reports + 1) * 100) {
             arch_debug_puts(reports == 0 ? "ON.: system ticks reached 100.\n" :
                                          "ON.: system ticks reached 200.\n");
             ++reports;
         }
+        __asm__ volatile ("cli" : : : "memory");
     }
 }

@@ -23,6 +23,8 @@ The current separation is:
 | --- | --- |
 | `kernel/core/` | Architecture-independent control flow and framebuffer rendering |
 | `kernel/mm/`, `kernel/include/memory.h` | Physical frame allocation, protection, statistics, and controlled tests |
+| `kernel/mm/heap.c`, `heap_boot.c`, `kernel/include/heap.h` | Heap allocation, page provisioning, statistics, and safety validation |
+| `kernel/arch/x86_64/virtual.c`, `kernel/include/virtual.h` | Four-level translation, owned mappings, permissions, and TLB invalidation |
 | `kernel/sched/` | Future portable scheduling |
 | `kernel/include/arch.h` | Shared contract for architecture services |
 | `kernel/include/kernel.h` | Kernel entry contract used by the boot adapter |
@@ -92,3 +94,17 @@ preserves the existing target triple, ISO layout, and QEMU TCG workflow.
 
 These are ordered milestones, not release dates or claims of current hardware
 compatibility. No ARM64 implementation is part of the present change.
+
+## Graphics foundation
+
+The console remains the default foreground interface. An optional `graphics`
+command displays a static original scene; Escape restores terminal cells and
+input. `graphics.c` provides clipped pixel/rectangle/line/text/clear operations,
+`font.c` owns the shared original bitmap font, and `framebuffer.c` handles RGB
+packing, pitch, and pointer-aware writes. A subsequent retained UI layer now composites opaque surfaces with focus,
+input routing and theme tokens; see [ui-foundation.md](ui-foundation.md). A foreground desktop/window manager now adds independent retained windows, resize
+and lifecycle controls, a dock, and a read-only guest RTC clock; see
+[window-management.md](window-management.md). Filesystem services, multitasking
+and process isolation remain future work. The current
+capability audit and future visual/interaction specification are in
+[gui-design.md](gui-design.md).

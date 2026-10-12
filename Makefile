@@ -45,11 +45,26 @@ ifneq ($(EXCEPTION_TEST)-$(PMM_TEST),0-0)
 $(error VMM_TEST must run separately from other injections)
 endif
 endif
-MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)
+HEAP_TEST ?= 0
+ifeq ($(filter $(HEAP_TEST),0 1 2),)
+$(error HEAP_TEST must be 0 through 2)
+endif
+ifneq ($(HEAP_TEST),0)
+ifeq ($(filter build/%,$(BUILD)),)
+$(error HEAP_TEST requires an isolated BUILD directory beneath build/)
+endif
+ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST),0-0-0)
+$(error HEAP_TEST must run separately from other injections)
+endif
+endif
+MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)
 # Portable subsystems plus only the selected architecture.
 COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched -name '*.c' -type f))
 ARCH_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.c' -type f))
 SOURCES := $(COMMON_SOURCES) $(ARCH_SOURCES)
+ifeq ($(HEAP_TEST),1)
+SOURCES += tests/heap_stress.c
+endif
 ASM_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.S' -type f))
 OBJECTS := $(patsubst %.c,$(BUILD)/obj/mode-$(MODE)/%.o,$(SOURCES)) $(patsubst %.S,$(BUILD)/obj/mode-$(MODE)/%.o,$(ASM_SOURCES))
 # Fault injection is restricted to isolated output directories.
@@ -58,7 +73,7 @@ ifeq ($(filter build/%,$(BUILD)),)
 $(error EXCEPTION_TEST requires an isolated BUILD directory beneath build/)
 endif
 endif
-CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST)
+CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST)
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
 	-mno-red-zone -mcmodel=kernel -mgeneral-regs-only \
@@ -210,7 +225,7 @@ LLVM_NM ?= /opt/homebrew/opt/llvm/bin/llvm-nm
 test-framebuffer:
 	@mkdir -p "$(BUILD)/tests"
 	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
-		-Ikernel/include kernel/core/framebuffer.c tests/unit/framebuffer.c \
+		-Ikernel/include kernel/core/framebuffer.c kernel/core/font.c tests/unit/framebuffer.c \
 		-o "$(BUILD)/tests/framebuffer"
 	"$(BUILD)/tests/framebuffer"
 
@@ -245,6 +260,20 @@ help:
 	@echo 'make verify-exceptions   Test nine fatal CPU fault cases under BIOS and UEFI'
 	@echo 'make verify-virtual     Test paging, permissions, TLB reuse, and rollback under BIOS/UEFI'
 	@echo 'make verify-memory      Test PMM exhaustion and fallback under BIOS/UEFI'
+	@echo 'make test-heap          Run sanitized native heap safety and stress tests'
+	@echo 'make verify-heap        Test heap stress and rollback under BIOS/UEFI'
+	@echo 'make test-windows       Run sanitized window lifecycle and geometry checks'
+	@echo 'make verify-windows     Exercise multiple windows under BIOS and UEFI'
+	@echo 'make test-ui            Run sanitized retained UI and dirty redraw tests'
+	@echo 'make verify-ui          Exercise UI focus, mouse controls, themes, and dragging'
+	@echo 'make test-graphics      Run sanitized drawing and clipping tests'
+	@echo 'make verify-graphics    Verify demo pixels and terminal return under BIOS/UEFI'
+	@echo 'make test-mouse         Run sanitized mouse packet and FIFO tests'
+	@echo 'make verify-mouse       Test IRQ12, buttons, cursor restoration, and keyboard coexistence'
+	@echo 'make test-terminal      Test terminal editing, commands, and scrolling'
+	@echo 'make verify-terminal    Exercise the terminal under BIOS and UEFI'
+	@echo 'make test-keyboard      Run sanitized scan-code and event queue tests'
+	@echo 'make verify-keyboard    Test IRQ1 input under BIOS and UEFI'
 	@echo 'make test-memory        Run native allocator safety tests'
 	@echo 'make test-framebuffer    Run native renderer safety tests'
 	@echo 'make check-tools   Report all required commands without installing'
@@ -257,3 +286,82 @@ verify-virtual: check-ovmf
 	$(MAKE) iso BUILD=$(BUILD)/virtual VMM_TEST=1
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/virtual/on.iso" "$(BUILD)/virtual" --timeout "$(UEFI_TIMEOUT)" --virtual-test
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/virtual/on.iso" "$(BUILD)/virtual" --timeout "$(UEFI_TIMEOUT)" --virtual-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-heap verify-heap
+test-heap:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/mm/heap.c tests/heap_stress.c tests/unit/heap.c -o "$(BUILD)/tests/heap"
+	"$(BUILD)/tests/heap"
+
+verify-heap: check-ovmf test-heap
+	@set -eu; for mode in 1 2; do \
+		output="$(BUILD)/heap/mode-$$mode"; mkdir -p "$$output"; \
+		$(MAKE) iso BUILD="$$output" HEAP_TEST="$$mode" > "$$output/build.log" 2>&1 || { cat "$$output/build.log"; exit 1; }; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output" --timeout "$(UEFI_TIMEOUT)" --heap-test "$$mode"; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output" --timeout "$(UEFI_TIMEOUT)" --heap-test "$$mode" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"; \
+	done
+
+.PHONY: test-keyboard verify-keyboard
+test-keyboard:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/keyboard.c tests/unit/keyboard.c -o "$(BUILD)/tests/keyboard"
+	"$(BUILD)/tests/keyboard"
+
+verify-keyboard: check-ovmf $(ISO) test-keyboard
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/keyboard/bios" --timeout "$(BOOT_TIMEOUT)" --keyboard-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/keyboard/uefi" --timeout "$(UEFI_TIMEOUT)" --keyboard-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-terminal verify-terminal
+test-terminal:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/terminal.c tests/unit/terminal.c -o "$(BUILD)/tests/terminal"
+	"$(BUILD)/tests/terminal"
+
+verify-terminal: check-ovmf $(ISO) test-terminal
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/terminal/bios" --timeout "$(BOOT_TIMEOUT)" --terminal-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/terminal/uefi" --timeout "$(UEFI_TIMEOUT)" --terminal-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-mouse verify-mouse
+test-mouse:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/mouse.c tests/unit/mouse.c -o "$(BUILD)/tests/mouse"
+	"$(BUILD)/tests/mouse"
+
+verify-mouse: check-ovmf $(ISO) test-mouse test-framebuffer
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/mouse/bios" --timeout "$(BOOT_TIMEOUT)" --mouse-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/mouse/uefi" --timeout "$(UEFI_TIMEOUT)" --mouse-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-graphics verify-graphics
+test-graphics:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/graphics.c kernel/core/framebuffer.c kernel/core/font.c tests/unit/graphics.c -o "$(BUILD)/tests/graphics"
+	"$(BUILD)/tests/graphics"
+
+verify-graphics: check-ovmf $(ISO) test-graphics
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/graphics/bios" --timeout "$(BOOT_TIMEOUT)" --graphics-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/graphics/uefi" --timeout "$(UEFI_TIMEOUT)" --graphics-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-ui verify-ui
+test-ui:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/ui.c kernel/core/window.c kernel/core/desktop.c kernel/core/graphics.c kernel/core/framebuffer.c kernel/core/font.c tests/unit/ui.c -o "$(BUILD)/tests/ui"
+	"$(BUILD)/tests/ui"
+
+verify-ui: check-ovmf $(ISO) test-ui
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/ui/bios" --timeout "$(BOOT_TIMEOUT)" --ui-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/ui/uefi" --timeout "$(UEFI_TIMEOUT)" --ui-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: verify-desktop
+verify-desktop: check-ovmf $(ISO) test-ui
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/desktop/bios" --timeout "$(BOOT_TIMEOUT)" --desktop-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/desktop/uefi" --timeout "$(UEFI_TIMEOUT)" --desktop-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-windows verify-windows
+test-windows:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/core/ui.c kernel/core/window.c kernel/core/desktop.c kernel/core/graphics.c kernel/core/framebuffer.c kernel/core/font.c tests/unit/window.c -o "$(BUILD)/tests/window"
+	"$(BUILD)/tests/window"
+
+verify-windows: check-ovmf $(ISO) test-windows
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/windows/bios" --timeout "$(BOOT_TIMEOUT)" --windows-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/windows/uefi" --timeout "$(UEFI_TIMEOUT)" --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"

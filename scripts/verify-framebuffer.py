@@ -17,6 +17,14 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--windows-test', action='store_true')
+    parser.add_argument('--desktop-test', action='store_true')
+    parser.add_argument('--ui-test', action='store_true')
+    parser.add_argument('--graphics-test', action='store_true')
+    parser.add_argument('--mouse-test', action='store_true')
+    parser.add_argument('--terminal-test', action='store_true')
+    parser.add_argument('--keyboard-test', action='store_true')
+    parser.add_argument('--heap-test', type=int, choices=[1, 2])
     parser.add_argument('--virtual-test', action='store_true')
     parser.add_argument('--memory-test', type=int, choices=[1, 2, 3])
     parser.add_argument('--ram', choices=['128M', '256M'], default='256M')
@@ -27,8 +35,8 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if args.exception and args.memory_test:
-        parser.error('--exception and --memory-test must be run separately')
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test)) > 1:
+        parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
     if bool(args.ovmf_code) != bool(args.ovmf_vars):
@@ -173,6 +181,16 @@ def main():
                     if marker not in memory_log.splitlines() or marker not in serial_lines():
                         raise RuntimeError('Missing PMM test marker: ' + marker)
                 log = debug.read_text().splitlines()
+                heap_marker = ('ON.: kernel heap unavailable; existing services retained.'
+                               if fallback or args.heap_test == 2 else
+                               'ON.: kernel heap ready; 1 MiB, supervisor writable NX.')
+                if heap_marker not in log or heap_marker not in serial_lines():
+                    raise RuntimeError('Missing heap initialization diagnostic')
+                if args.heap_test:
+                    marker = ('ON.: HEAP TEST alignment, coalescing, exhaustion, statistics, and stress passed.'
+                              if args.heap_test == 1 else 'ON.: HEAP TEST provisioning rollback passed.')
+                    if marker not in log or marker not in serial_lines():
+                        raise RuntimeError('Missing heap test success marker')
                 if args.virtual_test:
                     if 'ON.: VMM TEST allocation rollback passed.' not in log:
                         raise RuntimeError('Missing VMM rollback success marker')
@@ -224,6 +242,370 @@ def main():
                         return response['return']
 
             execute('qmp_capabilities')
+            if args.desktop_test or args.windows_test:
+                def wait_ui(marker, start=0):
+                    until=time.monotonic()+5
+                    while marker not in debug.read_text().splitlines()[start:]:
+                        if time.monotonic()>=until: raise RuntimeError('Missing desktop event: '+marker)
+                        time.sleep(0.02)
+                def keys(text):
+                    for key in text:
+                        execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'})
+                        time.sleep(0.06)
+                def shot(name):
+                    time.sleep(0.2)
+                    execute('screendump', {'filename':str(output/(name+'.png')),'format':'png'})
+                keys(list('desktop')+['ret'])
+                wait_ui('ON.: desktop ready.')
+                measure=output/'desktop-size.ppm'
+                execute('screendump', {'filename':str(measure)})
+                w,h=map(int,measure.read_bytes().split(b'\n',3)[1].split())
+                mx,my=w//2,h//2
+                def move(x,y):
+                    nonlocal mx,my
+                    while (mx,my)!=(x,y):
+                        dx=max(-60,min(60,x-mx));dy=max(-60,min(60,y-my))
+                        start=len(debug.read_text().splitlines())
+                        execute('input-send-event', {'events':[
+                            {'type':'rel','data':{'axis':'x','value':dx}},
+                            {'type':'rel','data':{'axis':'y','value':dy}}]})
+                        until=time.monotonic()+5
+                        while not any(line.startswith('ON.: mouse ') for line in debug.read_text().splitlines()[start:]):
+                            if time.monotonic()>=until: raise RuntimeError('UI mouse motion stopped')
+                            time.sleep(0.02)
+                        mx+=dx;my+=dy
+                def button(down):
+                    execute('input-send-event', {'events':[{'type':'btn','data':{'button':'left','down':down}}]})
+                    time.sleep(0.15)
+                def pixels():
+                    path=output/'desktop-check.ppm'
+                    execute('screendump', {'filename':str(path)})
+                    return path.read_bytes().split(b'\n',3)[3]
+                dark_scene=pixels()
+                assert tuple(dark_scene[(h//2*w)*3:(h//2*w)*3+3])==(12,20,38)
+                shot('desktop-dark')
+                cx,cy=w//8,h//5
+                move(cx+30,cy+40);button(True);button(False)
+                wait_ui('ON.: UI theme Light.')
+                light_scene=pixels()
+                assert tuple(light_scene[(h//2*w)*3:(h//2*w)*3+3])==(242,245,250)
+                shot('desktop-light')
+                # Change wallpaper, then drag the same retained Control surface.
+                move(cx+30,cy+130);button(True);button(False)
+                wait_ui('ON.: UI activate Change wallpaper')
+                assert pixels()!=light_scene, 'Wallpaper did not change'
+                shot('desktop-wallpaper')
+                move(cx+30,cy+10);button(True);move(cx+90,cy+40);button(False)
+                wait_ui('ON.: UI window moved.')
+                cx+=60;cy+=30
+                move(cx+210,cy+10);button(True);button(False)
+                wait_ui('ON.: desktop window minimized.')
+                shot('desktop-minimized')
+                keys(['f1']+list('zzz'))
+                shot('desktop-search-miss')
+                keys(['backspace']*3+list('control'))
+                shot('desktop-launcher')
+                keys(['ret']);wait_ui('ON.: desktop Control opened.')
+                move(cx+266,cy+10);button(True);button(False)
+                wait_ui('ON.: desktop window closed.')
+                start=len(debug.read_text().splitlines())
+                move(w//2, h-28);button(True);button(False)
+                wait_ui('ON.: desktop Control opened.',start)
+                if args.windows_test:
+                    # Control was restored above. Its original moved bounds are still retained.
+                    def event(key,marker):
+                        start=len(debug.read_text().splitlines());keys([key]);wait_ui(marker,start)
+                    shot('windows-overlap')
+                    event('f6','ON.: UI focus About ON.')
+                    event('shift-f6','ON.: UI focus Control')
+                    # Resize Control through its bottom/right corner using real PS/2 events.
+                    move(cx+277,cy+177);button(True)
+                    start=len(debug.read_text().splitlines())
+                    move(cx+357,cy+227);button(False);wait_ui('ON.: window resized.',start)
+                    wait_ui('ON.: window bounds Control '+str(cx)+','+str(cy)+',360,230',start)
+                    shot('windows-resized')
+                    event('f8','ON.: window maximized.')
+                    wait_ui('ON.: window bounds Control 0,28,'+str(w)+','+str(h-104))
+                    shot('windows-maximized')
+                    event('f7','ON.: desktop window minimized.')
+                    # Restore the maximized Control through its per-window dock item.
+                    start=len(debug.read_text().splitlines())
+                    move(w//2-110,h-62);button(True);button(False)
+                    wait_ui('ON.: desktop Control opened.',start)
+                    shot('windows-restored-maximized')
+                    event('f8','ON.: window geometry restored.')
+                    wait_ui('ON.: window bounds Control '+str(cx)+','+str(cy)+',360,230')
+                    shot('windows-restored')
+                    # Independent About window lifecycle; Control remains visible.
+                    event('f6','ON.: UI focus About ON.')
+                    event('f9','ON.: window closed About ON.')
+                    shot('windows-about-closed')
+                    start=len(debug.read_text().splitlines())
+                    move(w//2,h-62);button(True);button(False)
+                    wait_ui('ON.: desktop About ON. opened.',start)
+                    event('f6','ON.: UI focus Palette')
+                    event('f8','ON.: window maximized.')
+                    shot('windows-palette-maximized')
+                    event('f8','ON.: window geometry restored.')
+                    # Mouse close on Palette, then filtered launcher reopen.
+                    start=len(debug.read_text().splitlines())
+                    move(w//3+266,h//2+10);button(True);button(False)
+                    wait_ui('ON.: window closed Palette',start)
+                    keys(['f1']+['backspace']*7+list('palette'))
+                    shot('windows-launcher-palette')
+                    start=len(debug.read_text().splitlines());keys(['ret'])
+                    wait_ui('ON.: desktop Palette opened.',start)
+                    shot('windows-final')
+                keys(['esc']);wait_ui('ON.: retained UI closed; terminal restored.')
+                keys(list('mem')+['ret']);wait_ui('ON.: command mem')
+                keys(list('heap')+['ret']);wait_ui('ON.: command heap')
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text(): raise RuntimeError('Desktop fatal exception')
+                if args.windows_test: print('Verified multiple-window focus, reverse switching, resize, maximize/restore, independent close and dock/launcher restore')
+                print('Verified desktop themes, wallpaper, drag, minimize, search, close, restore, and terminal memory commands')
+            if args.ui_test:
+                def wait_ui(marker, start=0):
+                    until=time.monotonic()+5
+                    while marker not in debug.read_text().splitlines()[start:] or marker not in serial_lines():
+                        if time.monotonic()>=until:
+                            raise RuntimeError('Missing UI event: '+marker)
+                        time.sleep(0.05)
+                for key in ('u','i','ret'):
+                    execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'})
+                    time.sleep(0.05)
+                wait_ui('ON.: retained UI ready; Escape returns to terminal.')
+                def capture(name):
+                    path=output/(name+'.ppm')
+                    execute('screendump', {'filename':str(path)})
+                    magic,size,maximum,pixels=path.read_bytes().split(b'\n',3)
+                    assert magic==b'P6' and maximum==b'255'
+                    w,h=map(int,size.split())
+                    return w,h,pixels
+                w,h,dark_pixels=capture('ui-dark')
+                assert tuple(dark_pixels[(h//2*w)*3:(h//2*w)*3+3])==(12,20,38)
+                execute('screendump', {'filename':str(output/'ui-dark.png'),'format':'png'})
+                mx,my=w//2,h//2
+                def move(x,y):
+                    nonlocal mx,my
+                    while (mx,my)!=(x,y):
+                        dx=max(-60,min(60,x-mx));dy=max(-60,min(60,y-my))
+                        start=len(debug.read_text().splitlines())
+                        execute('input-send-event', {'events':[
+                            {'type':'rel','data':{'axis':'x','value':dx}},
+                            {'type':'rel','data':{'axis':'y','value':dy}}]})
+                        until=time.monotonic()+5
+                        while not any(line.startswith('ON.: mouse ') for line in debug.read_text().splitlines()[start:]):
+                            if time.monotonic()>=until: raise RuntimeError('UI mouse motion stopped')
+                            time.sleep(0.02)
+                        mx+=dx;my+=dy
+                def button(down):
+                    execute('input-send-event', {'events':[{'type':'btn','data':{'button':'left','down':down}}]})
+                    time.sleep(0.15)
+                # Focus Control and activate its Light button with the mouse.
+                control_x=w//8;control_y=h//5
+                move(control_x+30,control_y+44)
+                start=len(debug.read_text().splitlines());button(True);button(False)
+                wait_ui('ON.: UI activate Light',start);wait_ui('ON.: UI theme Light.',start)
+                _,_,light_pixels=capture('ui-light')
+                assert tuple(light_pixels[(h//2*w)*3:(h//2*w)*3+3])==(242,245,250)
+                execute('screendump', {'filename':str(output/'ui-light.png'),'format':'png'})
+                # Tab/Enter are routed to Control, switching to Dark then Auto.
+                for theme in ('Dark','Auto'):
+                    start=len(debug.read_text().splitlines())
+                    execute('human-monitor-command', {'command-line':'sendkey tab 20'});time.sleep(0.05)
+                    execute('human-monitor-command', {'command-line':'sendkey ret 20'})
+                    wait_ui('ON.: UI theme '+theme+'.',start)
+                _,_,auto_pixels=capture('ui-auto')
+                assert tuple(auto_pixels[(h//2*w)*3:(h//2*w)*3+3])==(12,20,38)
+                # Drag Control by its title bar and verify foreground ownership.
+                move(control_x+30,control_y+10);button(True)
+                start=len(debug.read_text().splitlines());move(control_x+90,control_y+40)
+                wait_ui('ON.: UI window moved.',start);button(False)
+                execute('human-monitor-command', {'command-line':'sendkey x 20'})
+                wait_ui('ON.: UI key routed to Control')
+                start=len(debug.read_text().splitlines())
+                execute('human-monitor-command', {'command-line':'sendkey f6 20'})
+                wait_ui('ON.: UI focus Canvas',start)
+                execute('human-monitor-command', {'command-line':'sendkey z 20'})
+                wait_ui('ON.: UI key routed to Canvas',start)
+                # Dock selection is a UI affordance, without launching apps.
+                move(w//2-160,h-28);start=len(debug.read_text().splitlines());button(True);button(False)
+                wait_ui('ON.: UI dock selected.',start)
+                execute('screendump', {'filename':str(output/'ui-final.png'),'format':'png'})
+                execute('human-monitor-command', {'command-line':'sendkey esc 20'})
+                wait_ui('ON.: retained UI closed; terminal restored.')
+                for key in ('h','e','l','p','ret'):
+                    execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'});time.sleep(0.05)
+                wait_ui('ON.: command help')
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text(): raise RuntimeError('UI caused fatal exception')
+                print('Verified retained UI mouse activation, theme pixels, keyboard focus, dragging, dock, and terminal restoration')
+            if args.graphics_test:
+                def key_text(text):
+                    for key in text:
+                        execute('human-monitor-command', {'command-line': 'sendkey ' + ('ret' if key=='\n' else key) + ' 20'})
+                        time.sleep(0.05)
+                def marker_wait(marker):
+                    until=time.monotonic()+5
+                    while marker not in debug.read_text().splitlines() or marker not in serial_lines():
+                        if time.monotonic()>=until:
+                            raise RuntimeError('Missing graphics diagnostic: '+marker)
+                        time.sleep(0.05)
+                key_text('graphics\n')
+                marker_wait('ON.: graphics demo ready; Escape returns to terminal.')
+                demo=output/'graphics-demo.ppm'
+                execute('screendump', {'filename': str(demo)})
+                execute('screendump', {'filename': str(output/'graphics-demo.png'), 'format':'png'})
+                magic,size,maximum,pixels=demo.read_bytes().split(b'\n',3)
+                assert magic==b'P6' and maximum==b'255'
+                width,height=map(int,size.split())
+                def color(x,y):
+                    start=(y*width+x)*3
+                    return tuple(pixels[start:start+3])
+                assert color(0,height//2)==(12,20,38), 'Wrong graphics clear color'
+                assert color(0,0)==(24,37,61), 'Top bar missing'
+                assert color(8,height-8)==(56,189,248), 'Pixel probe missing'
+                panel_x=width//10;panel_y=height//6
+                assert color(panel_x+10,panel_y+10)==(24,37,61), 'Rounded panel missing'
+                execute('human-monitor-command', {'command-line':'sendkey esc 20'})
+                marker_wait('ON.: graphics demo closed; terminal restored.')
+                key_text('help\n')
+                marker_wait('ON.: command help')
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
+                    raise RuntimeError('Graphics caused a fatal exception')
+                print('Verified graphics demo pixels, screenshot, Escape restoration, and terminal input')
+            if args.mouse_test:
+                for marker in ('ON.: PS/2 mouse ready; IRQ12, three-byte packets.',
+                               'ON.: framebuffer mouse cursor ready.'):
+                    if marker not in debug.read_text().splitlines() or marker not in serial_lines():
+                        raise RuntimeError('Missing mouse initialization: ' + marker)
+                def mouse_input(events, expected):
+                    start = len(debug.read_text().splitlines())
+                    execute('input-send-event', {'events': events})
+                    until = time.monotonic() + 5
+                    while time.monotonic() < until:
+                        if expected in debug.read_text().splitlines()[start:] and expected in serial_lines():
+                            return
+                        time.sleep(0.05)
+                    raise RuntimeError('Missing mouse event: ' + expected)
+                def relative(x, y):
+                    return [{'type': 'rel', 'data': {'axis': 'x', 'value': x}},
+                            {'type': 'rel', 'data': {'axis': 'y', 'value': y}}]
+                mouse_input(relative(30, 20), 'ON.: mouse X+ Y- L0 R0')
+                mouse_input(relative(-30, -20), 'ON.: mouse X- Y+ L0 R0')
+                for button, pressed, marker in [('left', True, 'L1 R0'), ('left', False, 'L0 R0'),
+                                                ('right', True, 'L0 R1'), ('right', False, 'L0 R0')]:
+                    mouse_input([{'type': 'btn', 'data': {'button': button, 'down': pressed}}],
+                                'ON.: mouse ' + marker)
+                def clear_help():
+                    execute('human-monitor-command', {'command-line': 'sendkey c-l-e-a-r-ret 20'})
+                    time.sleep(0.3)
+                    for key in ('h', 'e', 'l', 'p', 'ret'):
+                        execute('human-monitor-command', {'command-line': 'sendkey ' + key + ' 20'})
+                        time.sleep(0.05)
+                    time.sleep(0.3)
+                clear_help()
+                execute('screendump', {'filename': str(output / 'mouse-baseline.ppm')})
+                # Keep each injection within one PS/2 packet. QEMU otherwise
+                # carries large relative motion into later sample periods.
+                for _ in range(20):
+                    mouse_input(relative(-100, -100), 'ON.: mouse X- Y+ L0 R0')
+                clear_help()
+                execute('screendump', {'filename': str(output / 'mouse-over-text.ppm')})
+                mouse_input(relative(100, 100), 'ON.: mouse X+ Y- L0 R0')
+                execute('screendump', {'filename': str(output / 'mouse-after-move.ppm')})
+                # Compare the restored top-left text against the baseline.
+                def ppm(path):
+                    raw = path.read_bytes()
+                    magic, size, maximum, pixels = raw.split(b'\n', 3)
+                    if magic != b'P6' or maximum != b'255':
+                        raise RuntimeError('Unexpected QEMU PPM format')
+                    w, h = map(int, size.split())
+                    return w, h, pixels
+                w, h, over = ppm(output / 'mouse-over-text.ppm')
+                w2, h2, moved = ppm(output / 'mouse-after-move.ppm')
+                assert (w, h) == (w2, h2)
+                assert over != moved, 'Mouse cursor did not visibly move'
+                assert over[(4*w+1)*3:(4*w+1)*3+3] == bytes([255]*3), 'Cursor did not clamp at top-left'
+                bw, bh, baseline = ppm(output / 'mouse-baseline.ppm')
+                assert (bw, bh) == (w, h)
+                for y in range(16):
+                    start = y*w*3
+                    assert moved[start:start+12*3] == baseline[start:start+12*3], 'Cursor damaged terminal text'
+                for button, down, marker in [('left', True, 'L1 R0'), ('right', True, 'L1 R1'),
+                                              ('left', False, 'L0 R1'), ('right', False, 'L0 R0')]:
+                    mouse_input([{'type': 'btn', 'data': {'button': button, 'down': down}}], 'ON.: mouse '+marker)
+                for _ in range(20):
+                    mouse_input(relative(100, 100), 'ON.: mouse X+ Y- L0 R0')
+                execute('screendump', {'filename': str(output / 'mouse-bottom-right.ppm')})
+                cw, ch, corner = ppm(output / 'mouse-bottom-right.ppm')
+                offset = ((ch-16+4)*cw + cw-12+1)*3
+                assert corner[offset:offset+3] == bytes([255]*3), 'Cursor did not clamp at bottom-right'
+                commands_before = debug.read_text().splitlines().count('ON.: command help')
+                for key in ('h', 'e', 'l', 'p', 'ret'):
+                    execute('human-monitor-command', {'command-line': 'sendkey ' + key + ' 20'})
+                    mouse_input(relative(-10, -10), 'ON.: mouse X- Y+ L0 R0')
+                until = time.monotonic() + 5
+                while debug.read_text().splitlines().count('ON.: command help') <= commands_before:
+                    if time.monotonic() >= until:
+                        raise RuntimeError('Keyboard failed during concurrent mouse input')
+                    time.sleep(0.05)
+                assert 'ON.: command help' in debug.read_text().splitlines()
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
+                    raise RuntimeError('Mouse caused a fatal exception')
+                print('Verified IRQ12 mouse movement, left/right press/release, visible cursor, and keyboard coexistence')
+            if args.terminal_test:
+                if 'ON.: framebuffer terminal ready.' not in debug.read_text().splitlines():
+                    raise RuntimeError('Terminal initialization failed')
+                def type_line(text):
+                    keynames = {' ': 'spc', '!': 'shift-1', '\b': 'backspace', '\n': 'ret'}
+                    for ch in text:
+                        key = keynames.get(ch, 'shift-' + ch.lower() if ch.isupper() else ch)
+                        execute('human-monitor-command', {'command-line': 'sendkey ' + key + ' 20'})
+                        time.sleep(0.05)
+                type_line('help\nversion\nticks\nmem\nheap\nunknown\n')
+                # Force scrolling, then verify editing and Shift on a fresh screen.
+                for _ in range(16):
+                    type_line('echo scroll\n')
+                execute('screendump', {'filename': str(output / 'terminal-scroll.png'), 'format': 'png'})
+                type_line('clear\necho Ab!x\b\nhelp\n')
+                until = time.monotonic() + 5
+                required = ['help', 'version', 'ticks', 'mem', 'heap', 'unknown', 'clear', 'echo']
+                while time.monotonic() < until:
+                    if all('ON.: command ' + name in debug.read_text().splitlines() and
+                           'ON.: command ' + name in serial_lines() for name in required):
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError('Terminal command dispatch failed')
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
+                    raise RuntimeError('Terminal caused a fatal exception')
+                print('Verified interactive terminal commands, editing, Shift input, and scrolling')
+            if args.keyboard_test:
+                marker = 'ON.: PS/2 keyboard ready; IRQ1, translated set 1.'
+                if marker not in debug.read_text().splitlines() or marker not in serial_lines():
+                    raise RuntimeError('Keyboard initialization failed')
+                for keys in ('a', 'shift-a', 'shift-1', 'ret', 'backspace', 'a'):
+                    execute('human-monitor-command', {'command-line': 'sendkey ' + keys})
+                    time.sleep(0.2)
+                wanted = ['ON.: key a', 'ON.: key A', 'ON.: key !',
+                          'ON.: key ENTER', 'ON.: key BACKSPACE', 'ON.: key a']
+                until = time.monotonic() + 5
+                while time.monotonic() < until:
+                    actual = [line for line in debug.read_text().splitlines() if line.startswith('ON.: key ')]
+                    serial_actual = [line for line in serial_lines() if line.startswith('ON.: key ')]
+                    if actual == wanted and serial_actual == wanted:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise RuntimeError('Keyboard events differ: ' + repr(actual))
+                execute('human-monitor-command', {'command-line': 'sendkey b'})
+                until = time.monotonic() + 5
+                while 'ON.: key b' not in debug.read_text().splitlines():
+                    if time.monotonic() >= until:
+                        raise RuntimeError('Keyboard IRQ delivery stopped')
+                    time.sleep(0.1)
+                if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
+                    raise RuntimeError('Keyboard caused a fatal exception')
+                print('Verified IRQ1 keyboard input, Shift release, Enter, Backspace, and continued delivery')
             if args.exception:
                 registers = execute('human-monitor-command', {'command-line': 'info registers'})
                 assert 'HLT=1' in registers, registers
