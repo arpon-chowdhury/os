@@ -1,107 +1,148 @@
-# MyOS
+# ON.
 
-MyOS is a custom x86-64 operating system written from scratch in C with minimal
-assembly. Development takes place on an Apple M2 Mac (ARM64); the target machine
-is x86-64, so host and target tooling must remain separate.
+The display name is **ON.**; filenames, C identifiers, and shared headers use
+`on` / `ON`. The boot image is `build/on.iso` with ISO volume label `ON`.
 
-This repository currently contains only project scaffolding. There is no kernel
-implementation, bootable image, build system, or executable test suite yet.
+ON. is a general-purpose PC operating system written from scratch in C with
+minimal assembly. Intel and AMD x86-64 computers are the first target, followed
+by ARM64 PCs and potentially Apple Silicon Macs. ON. is not an Apple-only OS.
+
+Development currently happens on an Apple M2 Mac. This ARM64 macOS **host**
+cross-compiles an x86-64 ELF kernel; QEMU's TCG backend emulates the **target**
+CPU. The host does not determine the operating system's supported hardware.
+Only the x86-64 target is implemented today. See the
+[architecture roadmap](docs/architecture.md) for port boundaries and milestones.
+
+The current implementation is a minimal Limine boot entry: negotiate base
+revision 6, initialize a supported Limine framebuffer, draw a welcome screen
+with kernel version 0.1.0, emit debug-port and COM1 diagnostics, and idle between PIT timer interrupts.
+Basic x86-64 fatal exception handling installs a GDT, TSS, and IDT; see the
+[exception guide](docs/exceptions.md). The first legacy PIC/PIT interrupt subsystem provides IRQ dispatch and a 64-bit
+system tick counter; see the [interrupt guide](docs/interrupts.md). Physical memory
+management allocates protected 4 KiB frames from the Limine map; see the
+[memory guide](docs/memory.md). Four-level x86-64 virtual memory provides translation,
+mapping, permissions, and TLB invalidation while preserving boot mappings; see the
+[virtual memory guide](docs/virtual-memory.md). Scheduling, keyboard input, other
+drivers, and user space are future work.
+
+## Build and run
+
+Dependencies must already be available. No target installs software, and ordinary
+build targets do not download dependencies. See [the build guide](docs/build.md)
+for tool requirements, Apple Silicon setup, overrides, and verification status.
+
+```sh
+make help
+make objects       # Compile only; works with the available Apple Clang
+make kernel        # Requires ELF LLD (ld.lld)
+make fetch-limine  # Explicit, checksum-pinned project-local dependency download
+make iso           # Requires Limine binaries, a host C compiler, and xorriso
+make run           # Requires qemu-system-x86_64; type quit in its monitor to exit
+make verify-boot   # Bounded BIOS handoff and welcome-rendering check
+make verify-framebuffer # Save the QEMU screen and test the no-VGA fallback
+make test-framebuffer   # Native renderer memory safety tests
+make test-memory        # Native physical allocator safety tests
+make verify-virtual     # BIOS/UEFI virtual memory and rollback tests
+make verify-memory      # Controlled BIOS/UEFI allocation and fallback tests
+make run DISPLAY=cocoa # View the BIOS welcome screen in a macOS window
+make verify-uefi        # Verify x86-64 OVMF entry and capture the welcome screen
+make verify-exceptions  # Nine fatal fault cases, each under BIOS and UEFI
+make verify-interrupts  # Timer progress, welcome captures, and no-VGA fallback
+make run-uefi DISPLAY=cocoa # View the UEFI welcome screen
+```
+
+Successful boot should write `ON.: Limine handoff OK; x86-64 kernel entered.`
+to `build/debug.log` and `build/serial.log`, followed by the version and
+framebuffer status, then physical memory statistics. The kernel reports system ticks reaching 100 and 200, then continues sleeping
+between interrupts. The welcome screen stays visible.
+Kernel linking, ISO creation, and the QEMU BIOS handoff were verified on this
+Apple M2 Mac on 2026-10-13. `make verify-boot` captured the same message in
+`build/boot-test-debug.log`. x86-64 UEFI boot with QEMU's bundled OVMF firmware
+and the welcome screen were also verified. Real hardware remains unverified.
 
 ## Project goals
 
-- Build a small, understandable kernel with clearly separated subsystems.
-- Use C for core logic and assembly only where hardware interfaces require it.
-- Keep architecture-specific code separate from portable kernel code.
-- Integrate an existing bootloader through a documented boot protocol; the
-  bootloader and protocol will be selected before implementation begins.
-- Develop and test on an emulated x86-64 machine before attempting real hardware.
-- Keep builds reproducible and document design decisions and testing procedures.
+- Keep the kernel small, understandable, and primarily written in C.
+- Separate architecture-specific code from portable kernel logic.
+- Use an existing bootloader and document its protocol contract.
+- Test in an emulator before attempting supported real hardware.
+- Pin dependencies and keep generated files separate from source.
 
-## Repository structure
+## Project structure and files
+
+- `Makefile`: freestanding compilation, ELF linking, ISO packaging, explicit
+  dependency fetching, tool checks, and QEMU commands.
+- `kernel/core/main.c`: portable kernel logic using the architecture interface.
+- `kernel/mm/physical.c`, `boot.c`, and `kernel/include/memory.h`: physical page
+  allocation, reserved-memory protection, statistics, and isolated boot tests.
+- `kernel/core/framebuffer.c`: validated RGB framebuffer and bitmap welcome text.
+- `kernel/include/version.h`: the kernel version displayed and logged at boot.
+- `kernel/include/{arch,kernel}.h`: architecture services and kernel entry contract.
+- `kernel/arch/x86_64/entry.c`: Limine markers, revision check, and ELF entry.
+- `kernel/arch/x86_64/cpu.c` and `exceptions.S`: GDT/TSS/IDT setup, CPU exception
+  entry, fatal diagnostics, and isolated fault injection.
+- `kernel/arch/x86_64/interrupts.c`, `interrupts.h`, and `irq_entry.S`: legacy PIC
+  remapping, returning IRQ entry/dispatch, PIT programming, and the tick counter.
+- `kernel/arch/x86_64/platform.c`: x86-64 debug port/COM1 output and CPU halt.
+  Limine provides the initial stack and long-mode environment.
+- `kernel/arch/x86_64/linker.ld`: higher-half ELF layout, entry symbol, retained
+  Limine markers, and separate writable/executable/read-only segments.
+- `boot/protocol/limine_base.h`: small attributed subset of the official protocol
+  header, containing base-revision, request-boundary, framebuffer, memory-map,
+  and HHDM definitions.
+- `boot/config/limine.conf`: automatic ON. selection and kernel path.
+- `scripts/fetch-limine.sh`: explicit Limine 12.9.3 download with SHA-256 checking;
+  refuses to overwrite an existing dependency directory.
+- `scripts/verify-boot.sh`: bounded BIOS handoff and welcome-rendering check.
+- `scripts/verify-framebuffer.py`: QEMU BIOS/UEFI screenshots, serial checks, and BIOS no-VGA fallback.
+- `tests/unit/physical.c`: sanitized allocator validation and protection tests.
+- `tests/unit/framebuffer.c`: host renderer validation and memory guard tests.
+- `docs/build.md`: dependencies, first-boot procedure, and verification limits.
+- `docs/memory.md`: physical allocator contracts, statistics, and controlled tests.
+- `docs/interrupts.md`: PIC/PIT contracts, tick API, and verification.
+- `docs/exceptions.md`: exception contracts, test cases, evidence, and limitations.
+- `docs/architecture.md`: target roadmap, portable interfaces, and platform boundaries.
+- `.gitignore`: excludes generated artifacts, downloaded dependencies, local editor
+  settings, logs, and macOS metadata.
+- `.gitkeep` files: empty markers retaining the original scaffold directories.
+  They have no role in compilation.
+
+Reserved directories remain available for future work:
 
 ```text
-MyOS/
-├── boot/
-│   ├── config/             Bootloader configuration and image-layout inputs
-│   └── protocol/           Boot protocol definitions and integration adapters
-├── kernel/
-│   ├── arch/
-│   │   └── x86_64/         CPU-specific C, minimal assembly, and linker scripts
-│   ├── core/               Kernel entry and architecture-independent core logic
-│   ├── include/            Private kernel headers
-│   ├── mm/                 Memory management
-│   └── sched/              Task scheduling
-├── drivers/
-│   └── include/            Device drivers and their private interfaces
-├── libs/
-│   └── include/            Freestanding support libraries and their headers
-├── include/
-│   └── myos/               Shared project interfaces used across components
-├── scripts/                Future build, image, emulator, and tooling scripts
-├── tests/
-│   ├── unit/               Host-side tests for code suitable for isolated testing
-│   └── integration/        Boot and subsystem tests in an x86-64 emulator
-└── docs/                   Architecture notes, decisions, and developer guides
+boot/{config,protocol}/    Bootloader configuration and protocol integration
+kernel/arch/x86_64/        CPU-specific code and linker script
+kernel/{core,include}/    Kernel core and private interfaces
+kernel/mm/                Physical and virtual memory boot support
+kernel/sched/             Future scheduling
+drivers/include/          Future drivers and private interfaces
+libs/include/             Future freestanding libraries and headers
+include/on/             Shared interfaces across components
+scripts/                  Build and development helpers
+tests/{unit,integration}/  Future host and emulator tests
+docs/                     Developer guides and architecture decisions
 ```
 
-Each leaf directory currently contains an empty `.gitkeep` file. Git does not
-track empty directories, so these files preserve the scaffold. They are markers,
-not source code or build inputs, and can be removed when real files are added.
-
-Generated output will go in `build/`, which is ignored and will be created by
-future build tooling. Third-party downloads will go in the ignored `vendor/`
-directory; future tooling must record their versions and integrity information.
+All generated objects, dependency files, ELF/map files, host utilities, ISO staging
+files, images, downloads, and emulator logs live in ignored `build/`. Downloaded
+Limine files and their upstream license live in ignored `vendor/limine/`.
+Git manages repository metadata in `.git/`.
 
 ## Development phases
 
-1. **Repository foundation (current):** establish directory boundaries, Git
-   hygiene, project goals, and the development roadmap.
-2. **Toolchain and boot planning:** choose the bootloader and boot protocol,
-   define the memory and image layout, and document the cross-compilation and
-   emulator setup. No software installation is part of the current phase.
-3. **First boot:** add a minimal entry path, linker script, image build, and
-   basic diagnostic output; verify execution in an x86-64 emulator.
-4. **CPU and memory foundation:** implement descriptor tables, interrupts,
-   exception handling, physical memory allocation, and virtual memory.
-5. **Drivers and support libraries:** add foundational device support and the
-   freestanding routines needed by the kernel.
-6. **Tasks and higher-level services:** introduce scheduling, process boundaries,
-   system calls, and storage/filesystem support incrementally.
-7. **Hardening and validation:** expand automated tests, document interfaces,
-   improve reproducibility, and assess supported real hardware.
-
-## Development on Apple M2
-
-The host is ARM64 macOS; MyOS targets x86-64. Future builds will need a compiler
-that emits freestanding x86-64 ELF objects, a compatible linker, and any tools
-required by the chosen bootloader. Future execution tests will need x86-64
-emulation, such as QEMU, rather than native execution on the M2 CPU.
-
-Do not assume the default macOS compiler/linker produces suitable kernel
-artifacts. Exact tool versions, installation steps, and build commands will be
-documented when the toolchain is selected. There are no build or test commands
-to run at this stage.
-
-## Files in this initial scaffold
-
-- `README.md`: project goals, directory responsibilities, phased roadmap, and
-  host/target development constraints.
-- `.gitignore`: excludes macOS metadata, editor-local files, generated build
-  artifacts, logs, and future downloaded dependencies.
-- `boot/config/.gitkeep`: preserves the bootloader configuration directory.
-- `boot/protocol/.gitkeep`: preserves the boot protocol integration directory.
-- `kernel/arch/x86_64/.gitkeep`: preserves the target architecture directory.
-- `kernel/core/.gitkeep`: preserves the common kernel core directory.
-- `kernel/include/.gitkeep`: preserves the private kernel header directory.
-- `kernel/mm/.gitkeep`: preserves the memory management directory.
-- `kernel/sched/.gitkeep`: preserves the scheduling directory.
-- `drivers/include/.gitkeep`: preserves the driver tree and private header directory.
-- `libs/include/.gitkeep`: preserves the support library tree and header directory.
-- `include/myos/.gitkeep`: preserves the shared project header directory.
-- `scripts/.gitkeep`: preserves the build and development script directory.
-- `tests/unit/.gitkeep`: preserves the host-side unit test directory.
-- `tests/integration/.gitkeep`: preserves the emulator integration test directory.
-- `docs/.gitkeep`: preserves the documentation directory.
-
-Git initialization also creates `.git/`, Git's internal metadata directory. Git
-manages its files; they are not project source files and must not be edited by hand.
+1. **Repository foundation:** directory boundaries, Git hygiene, and roadmap.
+2. **Build and boot integration (verified):** freestanding toolchain configuration,
+   Limine protocol, linker layout, ISO packaging, and emulator workflow. Compilation
+   and linking are verified.
+3. **First boot validation (verified):** ELF segments, ISO, BIOS boot handoff, and
+   diagnostic output passed under QEMU TCG on Apple M2.
+4. **CPU and memory foundation (current):** fatal exceptions, legacy PIC/PIT interrupts,
+   physical page allocation, and virtual memory management are implemented.
+5. **Drivers and libraries:** foundational device support and freestanding routines.
+6. **Tasks and services:** scheduling, process boundaries, system calls, and storage.
+7. **x86-64 PC hardening:** automated tests, reproducible builds, interface
+   documentation, and validation on selected Intel and AMD computers.
+8. **ARM64 PC port (future):** reuse portable subsystems and implement ARM64 CPU
+   and supported PC platform services after the x86-64 foundation is established.
+9. **Apple Silicon evaluation (potential):** assess a separate platform port;
+   ARM64 CPU support alone does not provide Apple hardware support.
