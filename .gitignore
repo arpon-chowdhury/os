@@ -1,0 +1,30 @@
+# macOS metadata
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+
+# Local editor settings and temporary files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Generated build output and downloaded dependencies
+/build/
+/out/
+/vendor/
+*.o
+*.a
+*.so
+*.dylib
+*.elf
+*.bin
+*.img
+*.iso
+*.map
+*.d
+
+# Local execution logs
+*.log
