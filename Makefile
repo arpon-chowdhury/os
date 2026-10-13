@@ -81,9 +81,21 @@ ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST),0-0-0
 $(error USER_TEST must run separately from other injections)
 endif
 endif
-MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)
+APP_TEST ?= 0
+ifeq ($(filter $(APP_TEST),0 1 2 3),)
+$(error APP_TEST must be 0 through 3)
+endif
+ifneq ($(APP_TEST),0)
+ifeq ($(filter build/%,$(BUILD)),)
+$(error APP_TEST requires an isolated BUILD directory beneath build/)
+endif
+ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST),0-0-0-0-0-0)
+$(error APP_TEST must run separately from other injections)
+endif
+endif
+MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)-$(APP_TEST)
 # Portable subsystems plus only the selected architecture.
-COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched -name '*.c' -type f))
+COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched kernel/exec kernel/services libs -name '*.c' -type f))
 ARCH_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.c' -type f))
 SOURCES := $(COMMON_SOURCES) $(ARCH_SOURCES)
 ifeq ($(HEAP_TEST),1)
@@ -97,7 +109,8 @@ ifeq ($(filter build/%,$(BUILD)),)
 $(error EXCEPTION_TEST requires an isolated BUILD directory beneath build/)
 endif
 endif
-CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST) -DON_USER_TEST=$(USER_TEST)
+CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST) -DON_USER_TEST=$(USER_TEST) -DON_APP_TEST=$(APP_TEST)
+CPPFLAGS += -DON_APP_PROBE_PATH='"$(BUILD)/apps/probe.elf"' -DON_APP_FAULT_PATH='"$(BUILD)/apps/fault.elf"' -DON_APP_RETURN_PATH='"$(BUILD)/apps/return.elf"' -DON_APP_LOAD_PATH='"$(BUILD)/apps/load.elf"'
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
 	-mno-red-zone -mcmodel=kernel -mgeneral-regs-only \
@@ -270,6 +283,10 @@ check-deps:
 	done; exit $$missing
 
 help:
+	@echo 'make apps               Build independent static ON. ABI ELF64 test programs'
+	@echo 'make test-elf           Run sanitized ELF validation/population/rollback tests'
+	@echo 'make verify-apps        Test ELF/syscall safety on BIOS/UEFI'
+	@echo 'make verify-app-load    Exercise desktop under two loaded syscall-issuing applications'
 	@echo 'make objects       Compile freestanding x86-64 objects only'
 	@echo 'make kernel        Compile and link build/kernel.elf (default)'
 	@echo 'make fetch-limine  Explicitly download checksum-pinned Limine'
@@ -398,7 +415,7 @@ verify-windows: check-ovmf $(ISO) test-windows
 .PHONY: test-tasks verify-tasks
 test-tasks:
 	@mkdir -p "$(BUILD)/tests"
-	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/sched/task.c kernel/sched/process.c kernel/mm/address_space.c tests/address_model.c tests/unit/task.c -o "$(BUILD)/tests/task"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/sched/task.c kernel/sched/process.c kernel/mm/address_space.c kernel/exec/elf.c kernel/services/syscall.c tests/address_model.c tests/unit/task.c -o "$(BUILD)/tests/task"
 	"$(BUILD)/tests/task"
 
 verify-tasks: check-ovmf test-tasks
@@ -412,7 +429,7 @@ verify-tasks: check-ovmf test-tasks
 .PHONY: test-address-spaces verify-user
 test-address-spaces:
 	@mkdir -p "$(BUILD)/tests"
-	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/mm/address_space.c tests/address_model.c tests/unit/address_space.c -o "$(BUILD)/tests/address-space"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/mm/address_space.c tests/address_model.c tests/unit/address_space.c -o "$(BUILD)/tests/address-space"
 	"$(BUILD)/tests/address-space"
 
 verify-user: check-ovmf test-address-spaces test-tasks
@@ -428,3 +445,41 @@ verify-user-load: check-ovmf
 	$(MAKE) iso BUILD="$(BUILD)/user/load" USER_TEST=3
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/user/load/on.iso" "$(BUILD)/user/load/bios" --timeout "$(UEFI_TIMEOUT)" --user-test 3 --windows-test
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/user/load/on.iso" "$(BUILD)/user/load/uefi" --timeout "$(UEFI_TIMEOUT)" --user-test 3 --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-elf
+test-elf:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/mm/address_space.c kernel/exec/elf.c tests/address_model.c tests/unit/elf.c -o "$(BUILD)/tests/elf"
+	"$(BUILD)/tests/elf"
+
+# Independent static user executables. No host installs/downloads or guest disks.
+$(BUILD)/apps/probe.o: apps/tests/probe.S include/on/syscall.h
+	@mkdir -p "$(dir $@)"
+	$(CC) --target=x86_64-unknown-none-elf -Iinclude -c "$<" -o "$@"
+$(BUILD)/apps/load.o: apps/tests/load.S include/on/syscall.h
+	@mkdir -p "$(dir $@)"
+	$(CC) --target=x86_64-unknown-none-elf -Iinclude -c "$<" -o "$@"
+$(BUILD)/apps/fault.o: apps/tests/fault.S include/on/syscall.h
+	@mkdir -p "$(dir $@)"
+	$(CC) --target=x86_64-unknown-none-elf -Iinclude -DAPP_FAULT=1 -c "$<" -o "$@"
+$(BUILD)/apps/return.o: apps/tests/fault.S include/on/syscall.h
+	@mkdir -p "$(dir $@)"
+	$(CC) --target=x86_64-unknown-none-elf -Iinclude -DAPP_FAULT=2 -c "$<" -o "$@"
+$(BUILD)/apps/%.elf: $(BUILD)/apps/%.o apps/linker.ld
+	$(LD) -m elf_x86_64 -nostdlib -static -z max-page-size=4096 --build-id=none -T apps/linker.ld -o "$@" "$<"
+ifneq ($(APP_TEST),0)
+$(BUILD)/obj/mode-$(MODE)/kernel/arch/x86_64/app_images.o: $(BUILD)/apps/probe.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/return.elf $(BUILD)/apps/load.elf
+endif
+.PHONY: apps verify-apps verify-app-load
+apps: $(BUILD)/apps/probe.elf $(BUILD)/apps/fault.elf $(BUILD)/apps/return.elf $(BUILD)/apps/load.elf
+verify-apps: check-ovmf test-elf test-tasks test-address-spaces
+	@set -eu; for mode in 1 2; do \
+		output="$(BUILD)/apps-test/mode-$$mode"; mkdir -p "$$output"; \
+		$(MAKE) iso BUILD="$$output" APP_TEST="$$mode" > "$$output/build.log" 2>&1 || { cat "$$output/build.log"; exit 1; }; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/bios" --timeout "$(UEFI_TIMEOUT)" --app-test "$$mode"; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/uefi" --timeout "$(UEFI_TIMEOUT)" --app-test "$$mode" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"; \
+	done
+verify-app-load: check-ovmf
+	$(MAKE) iso BUILD="$(BUILD)/apps-test/load" APP_TEST=3
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/apps-test/load/on.iso" "$(BUILD)/apps-test/load/bios" --timeout "$(UEFI_TIMEOUT)" --app-test 3 --windows-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/apps-test/load/on.iso" "$(BUILD)/apps-test/load/uefi" --timeout "$(UEFI_TIMEOUT)" --app-test 3 --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"

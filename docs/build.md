@@ -326,8 +326,9 @@ also verify repeated timer delivery under BIOS and UEFI; see the
 [interrupt guide](interrupts.md). Physical frame allocation is also implemented; see the [memory guide](memory.md).
 Virtual memory translation, mapping, permissions, and TLB invalidation are
 implemented; see the [virtual memory guide](virtual-memory.md). PS/2 input, kernel scheduling and isolated user execution are also implemented;
-see [multitasking](multitasking.md) and [user mode](user-mode.md). General
-syscalls, executable loading and storage remain unimplemented.
+see [multitasking](multitasking.md) and [user mode](user-mode.md). Bounded
+syscalls and static ELF loading are implemented; storage remains pending. See
+[syscalls and loader](syscalls-and-loader.md) for build commands, verification and limits.
 
 ## Exception builds and tests
 
@@ -376,3 +377,13 @@ CPL3/CR3, permissions, user fault containment and real allocation rollback under
 BIOS/UEFI. `make verify-user-load` uses USER_TEST=3 for GUI regressions under two
 sustained user workers. These fixtures load trusted embedded bytes only; normal
 boot starts no applications. See [contracts and results](user-mode.md).
+
+## Static application and syscall checks
+
+`make apps` builds independent ON. ABI ELF64 test executables. `make test-elf`
+runs the sanitized parser/population suite. `make verify-apps` checks syscall
+entry/return, pointers, ELF validation, faults, repeated launches and rollback
+under BIOS/UEFI. `make verify-app-load` runs desktop/window regressions with two
+loaded syscall-issuing applications. Images are isolated in `build/apps-test/`;
+normal boot has no embedded or automatically launched user application. See
+[implementation, actual results and limits](syscalls-and-loader.md).

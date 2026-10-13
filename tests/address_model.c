@@ -22,3 +22,6 @@ void *pmm_page_pointer(uint64_t p) {return !(p&4095) && p/4096<128?pages[p/4096]
 uint64_t arch_address_kernel_root(void) {return 4096;}
 uint64_t arch_address_current_root(void) {return active;}
 void arch_address_activate(uint64_t root) {active=root?root:4096;}
+
+unsigned model_invalidations;
+void arch_address_invalidate(uint64_t root,uintptr_t address) {(void)address;if(root==active) ++model_invalidations;}

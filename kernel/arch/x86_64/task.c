@@ -77,7 +77,7 @@ bool arch_task_privilege_boundary(void) {
     if(((gdt[1]>>45)&3) || ((gdt[2]>>45)&3) || ((gdt[3]>>45)&3)) return false;
     if(((gdt[5]>>45)&3)!=3 || ((gdt[6]>>45)&3)!=3) return false;
     const uint8_t *idt=(const uint8_t *)(uintptr_t)idtr.base;
-    for(unsigned i=0;i<256;++i) if((idt[i*16+5]&0x60)!=(i==128?0x60:0)) return false;
+    for(unsigned i=0;i<256;++i) if((idt[i*16+5]&0x60)!=((i==128 || i==129)?0x60:0)) return false;
     return true;
 }
 

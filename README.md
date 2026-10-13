@@ -28,8 +28,8 @@ management allocates protected 4 KiB frames from the Limine map; see the
 mapping, permissions, and TLB invalidation while preserving boot mappings; see the
 [virtual memory guide](docs/virtual-memory.md). The [kernel heap](docs/heap.md)
 provides safe allocation, alignment, coalescing, and statistics. Preemptive kernel tasks, PS/2 input and a retained desktop are implemented;
-isolated user execution is implemented; executable loading, storage and a
-filesystem remain future work.
+isolated user execution, bounded syscalls and strict static ELF loading are
+implemented. Storage and a reliable filesystem remain future work.
 
 ## Build and run
 
@@ -281,11 +281,14 @@ Interactive shell: type `desktop` in the terminal. See [desktop controls and lim
 
 Independent foreground windows: see [window management](docs/window-management.md). Run `make test-windows` and `make verify-windows` for sanitizer and BIOS/UEFI lifecycle/geometry tests.
 
-Preemptive kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). Isolated user tasks are implemented; general syscalls and executable loading remain pending. See [user execution](docs/user-mode.md).
+Preemptive kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). Isolated user tasks, bounded ABI v1 syscalls and strict static ELF loading are implemented. See [user execution](docs/user-mode.md).
 
-Core Alpha work follows the [ordered release gates](docs/architecture.md#on-os-core-alpha-release-order). The user-execution phase is verified; optional features wait until the core is stable.
+Core Alpha work follows the [ordered release gates](docs/architecture.md#on-os-core-alpha-release-order). The current syscall/loader phase is documented in [syscalls and ELF loading](docs/syscalls-and-loader.md); optional features wait until the core is stable.
 
 Run `make test-address-spaces`, `make verify-user`, and `make verify-user-load`
 for native ownership checks, BIOS/UEFI isolation/fault/rollback tests and desktop
 interaction under sustained Ring 3 load. Normal boot creates no user applications;
-embedded test blobs are not an application loader or a general syscall API.
+`make apps` builds independent static ELF test executables. Run `make test-elf`,
+`make verify-apps` and `make verify-app-load` for loader/ABI safety and BIOS/UEFI
+desktop stress checks. The loader accepts kernel-owned images; filesystem launch
+and full application compatibility remain pending.

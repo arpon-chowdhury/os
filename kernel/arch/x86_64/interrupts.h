@@ -8,6 +8,6 @@
 typedef void (*x86_irq_handler)(const struct exception_frame *frame);
 /* Registration changes require IF clear; a NULL handler masks the line. */
 bool x86_irq_register(unsigned int irq, x86_irq_handler handler);
-void x86_irq_dispatch(const struct exception_frame *frame);
+void x86_irq_dispatch(struct exception_frame *frame);
 void x86_idt_set_gate(unsigned int vector, uintptr_t handler, uint8_t ist);
 #endif

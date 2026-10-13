@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "../elf_fixture.h"
 static bool enabled=true,fail_allocate;
 static uint64_t ticks,switches,allocations,releases;
 static void *stacks[TASK_MAX];
@@ -14,6 +15,9 @@ uint64_t arch_interrupt_save(void) {uint64_t f=enabled?0x200:0;enabled=false;ret
 void arch_interrupt_restore(uint64_t f) {enabled=(f&0x200)!=0;}
 uint64_t arch_system_ticks(void) {return ticks;}
 void arch_debug_puts(const char *text) {(void)text;}
+static char output[ON_WRITE_MAX];static size_t output_size;
+void arch_debug_write(const char *text,size_t length) {assert(length<=sizeof(output));memcpy(output,text,length);output_size=length;}
+__attribute__((noreturn)) void process_user_stop(int64_t status,const void *frame,uint64_t cr2) {(void)status;(void)frame;(void)cr2;abort();}
 __attribute__((noreturn)) void arch_halt(void) {abort();}
 bool arch_task_stack_allocate(unsigned slot,uintptr_t *base) {
     assert(!enabled && slot>0 && slot<TASK_MAX && !stacks[slot]);
@@ -84,10 +88,50 @@ int main(void) {
     extern unsigned model_live;
     fail_allocate=true;
     assert(!process_create("stack-fail",user_code,sizeof(user_code),0) && !model_live);
+    uint8_t image[FIXTURE_SIZE];elf_fixture(image);
+    extern int model_fail_after;
+    for(int budget=0;budget<16;++budget) {
+        model_fail_after=budget;
+        task_id loaded=process_load_elf("elf-rollback",image,sizeof(image));
+        model_fail_after=-1;
+        if(loaded) {assert(task_terminate(loaded));task_reap();}
+        assert(!model_live && task_list(info,TASK_MAX)==1 && enabled);
+    }
+    fail_allocate=true;
+    assert(!process_load_elf("elf-stack-fail",image,sizeof(image)) && !model_live);
+    task_id loaded=process_load_elf("elf-retry",image,sizeof(image));assert(loaded);
+    assert(task_terminate(loaded));task_reap();assert(!model_live);
     task_id user=process_create("user",user_code,sizeof(user_code),42);assert(user);
     assert(snapshot(user).address_root);
     struct vmm_translation tr;assert(process_translate(user,PROCESS_DATA,&tr));
     assert(*(uint64_t *)pmm_page_pointer(tr.physical)==42);
+    task_yield();assert(task_current()==user && task_current_user());
+    struct syscall_request call={.number=ON_SYS_ABI};assert(syscall_dispatch(&call,0)==1);
+    call.number=UINT64_MAX;assert(syscall_dispatch(&call,0)==-ON_ENOSYS);
+    call=(struct syscall_request){ON_SYS_WRITE,{1,PROCESS_DATA,8}};
+    assert(syscall_dispatch(&call,0)==8 && output_size==8 && output[0]==42);
+    call.arguments[1]=PROCESS_DATA+4092;assert(syscall_dispatch(&call,0)==-ON_EFAULT && output_size==8);
+    call.arguments[1]=UINT64_MAX;assert(syscall_dispatch(&call,0)==-ON_EFAULT);
+    call.arguments[2]=0;assert(syscall_dispatch(&call,0)==0 && !output_size);
+    call.arguments[2]=ON_WRITE_MAX+1;assert(syscall_dispatch(&call,0)==-ON_E2BIG);
+    call.arguments[0]=0;assert(syscall_dispatch(&call,0)==-ON_EBADF);
+    const uint64_t update=99;assert(process_copy_out(PROCESS_DATA,&update,8));
+    assert(!process_copy_out(PROCESS_CODE,&update,8));
+    extern int model_fail_after;unsigned frames_before=model_live;
+    model_fail_after=2;assert(process_memory_allocate(8192)==-ON_ENOMEM && model_live==frames_before);model_fail_after=-1;
+    assert(process_memory_allocate(0)==-ON_EINVAL && process_memory_allocate(UINT64_MAX)==-ON_EINVAL);
+    int64_t block=process_memory_allocate(8193);assert(block==PROCESS_HEAP_BASE);
+    uint64_t zero=1;assert(process_copy_in(&zero,block,8) && zero==0);
+    assert(process_memory_free(block,8192)==-ON_EINVAL);
+    assert(process_memory_free(PROCESS_CODE,4096)==-ON_EINVAL);
+    assert(process_memory_free(block,8193)==0 && process_memory_free(block,8193)==-ON_EINVAL && model_live==frames_before);
+    assert(!process_copy_in(&zero,block,8));
+    int64_t blocks[PROCESS_ALLOCATIONS];
+    for(unsigned i=0;i<PROCESS_ALLOCATIONS;++i) {blocks[i]=process_memory_allocate(4096);assert(blocks[i]>0);}
+    assert(process_memory_allocate(4096)==-ON_ENOMEM);
+    for(unsigned i=0;i<PROCESS_ALLOCATIONS;++i) assert(process_memory_free(blocks[i],4096)==0);
+    assert(process_memory_allocate(4096)>0); /* Cancellation also frees outstanding memory. */
+    call.number=ON_SYS_YIELD;assert(syscall_dispatch(&call,0)==0 && task_current()==boot);
     assert(task_terminate(user));task_reap();
     struct process_result result;assert(process_result(user,&result) && result.finished && result.reclaimed && result.status==-1 && !model_live);
     assert(!process_translate(user,PROCESS_DATA,&tr));
@@ -95,5 +139,5 @@ int main(void) {
     assert(!process_result(user,&result));assert(task_terminate(reused_user));task_reap();assert(!model_live);
     assert(!process_create("bad",0,4,0) && !process_create("big",user_code,4097,0));
     task_fault_report();assert(snapshot(boot).state==TASK_FAULTED);task_diagnostics();
-    puts("Task policy, states, round-robin, sleep deadlines, termination/reap, generations, capacity, allocation failure, IF preservation, accounting, process cancellation/rollback and disabled general syscall contracts passed.");
+    puts("Task policy, states, round-robin, sleep deadlines, termination/reap, generations, capacity, allocation failure, IF preservation, accounting, process cancellation/rollback ELF transaction rollback and bounded syscall contracts passed.");
 }

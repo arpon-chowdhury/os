@@ -204,3 +204,7 @@ void arch_address_activate(uint64_t process_root) {
     /* PCID and global pages are disabled: every switch flushes stale mappings. */
     __asm__ volatile ("mov %0,%%cr3" : : "r"(selected) : "memory");
 }
+
+void arch_address_invalidate(uint64_t space_root,uintptr_t address) {
+    if(arch_address_current_root()==space_root) invalidate(address);
+}

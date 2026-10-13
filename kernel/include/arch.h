@@ -2,6 +2,7 @@
 #define ON_ARCH_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 /* Implemented by the selected architecture; debug output may be emulator-only. */
@@ -19,6 +20,7 @@ bool arch_clock_minute(unsigned int *minute);
 __attribute__((noreturn)) void arch_idle(void);
 const char *arch_name(void);
 void arch_debug_puts(const char *text);
+void arch_debug_write(const char *text,size_t length);
 __attribute__((noreturn)) void arch_halt(void);
 
 #endif

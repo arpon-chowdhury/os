@@ -35,7 +35,11 @@ bool x86_irq_register(unsigned int irq, x86_irq_handler handler) {
     return true;
 }
 
-void x86_irq_dispatch(const struct exception_frame *frame) {
+void x86_irq_dispatch(struct exception_frame *frame) {
+    if(frame->vector==129) {
+        extern void x86_syscall_interrupt(struct exception_frame *);
+        x86_syscall_interrupt(frame);return;
+    }
     if(frame->vector==128) {
         if((frame->cs&3)!=3 || !task_current_user()) arch_halt();
         process_user_stop((int64_t)frame->rax,frame,0);

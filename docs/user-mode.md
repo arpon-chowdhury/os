@@ -1,3 +1,5 @@
+> Historical Ring 3 phase record. The subsequent [syscall and ELF loader phase](syscalls-and-loader.md) implements bounded user copies, ABI v1 and independent static executables. Statements below about pending syscalls/loading describe this earlier checkpoint.
+
 # Ring 3 and owned address spaces
 
 ON. now runs small embedded x86-64 user programs in isolated page-table roots,

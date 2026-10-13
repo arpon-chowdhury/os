@@ -18,6 +18,13 @@ x86_user_exit_interrupt:
     pushq $128
     jmp x86_irq_common
 .size x86_user_exit_interrupt,.-x86_user_exit_interrupt
+.global x86_syscall_interrupt_entry
+.type x86_syscall_interrupt_entry,@function
+x86_syscall_interrupt_entry:
+    pushq $0
+    pushq $129
+    jmp x86_irq_common
+.size x86_syscall_interrupt_entry,.-x86_syscall_interrupt_entry
 .type x86_irq_common, @function
 x86_irq_common:
     cld

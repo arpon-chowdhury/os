@@ -105,27 +105,28 @@ packing, pitch, and pointer-aware writes. A subsequent retained UI layer now com
 input routing and theme tokens; see [ui-foundation.md](ui-foundation.md). A foreground desktop/window manager now adds independent retained windows, resize
 and lifecycle controls, a dock, and a read-only guest RTC clock; see
 [window-management.md](window-management.md). Preemptive kernel tasks now run
-on separate stacks; filesystem services and executable loading remain future work; isolated user
-execution is described in [user-mode.md](user-mode.md). The current
+on separate stacks; isolated user execution is described in [user-mode.md](user-mode.md),
+and static executable loading in [syscalls-and-loader.md](syscalls-and-loader.md).
+Filesystem services remain future work. The current
 capability audit and future visual/interaction specification are in
 [gui-design.md](gui-design.md).
 
 ## Kernel task scheduling
 
-See [preemptive kernel tasks](multitasking.md). The single-CPU foreground GUI owns input/render state while a separate diagnostic task sleeps/yields on a guarded supervisor/NX stack. IRQ0 switches after PIC EOI with a five-tick quantum; IRQ scheduling never allocates or reaps. Kernel tasks share CR3; user tasks select owned roots and per-task TSS.RSP0. General syscalls and executable loading remain pending; see [user execution](user-mode.md).
+See [preemptive kernel tasks](multitasking.md). The single-CPU foreground GUI owns input/render state while a separate diagnostic task sleeps/yields on a guarded supervisor/NX stack. IRQ0 switches after PIC EOI with a five-tick quantum; IRQ scheduling never allocates or reaps. Kernel tasks share CR3; user tasks select owned roots and per-task TSS.RSP0. Versioned bounded syscalls and strict static ELF loading are implemented; see [syscalls and loader](syscalls-and-loader.md).
 
 ## ON. OS Core Alpha release order
 
 Complete and verify each phase before implementing the next. The current phase
-was isolated user execution and is verified; see [implementation and verification](user-mode.md). Existing
+was syscalls and executable loading and is verified; see [implementation and verification](syscalls-and-loader.md). Existing
 Windows 11 + macOS-inspired desktop, adaptive theme tokens and bottom dock stay
 in place. The graphical demo is not yet a usable Core Alpha release.
 
 1. Preemptive scheduler: bounded single-CPU policy, context preservation, sleep,
    lifecycle, guards, rollback, responsive desktop and BIOS/UEFI regressions.
-2. User execution and memory isolation (verified this phase): owned address spaces, supervisor-only
+2. User execution and memory isolation (verified): owned address spaces, supervisor-only
    kernel mappings, validated privilege transitions and isolated fault teardown.
-3. Working syscalls and application loading: bounded user copies, validated
+3. Working syscalls and application loading (verified current phase): bounded user copies, validated
    executable images and resource ownership.
 4. Storage drivers and bounded disk I/O against disposable QEMU disk images.
 5. Reliable filesystem: validated metadata, safe operations, failure recovery

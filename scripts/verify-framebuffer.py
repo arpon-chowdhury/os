@@ -17,6 +17,7 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--app-test', type=int, choices=[1,2,3])
     parser.add_argument('--user-test', type=int, choices=[1,2,3])
     parser.add_argument('--task-test', type=int, choices=[1,2,3])
     parser.add_argument('--windows-test', action='store_true')
@@ -37,7 +38,7 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test)) > 1:
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test, args.app_test)) > 1:
         parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
@@ -138,6 +139,20 @@ def main():
                     assert fields['rax'] == 1 and fields['rcx'] == 0 and fields['rdx'] == 0, fields
                 assert 'ON.: framebuffer welcome screen ready.' in log
                 assert 'nested fatal' not in log and 'ERROR exception test returned' not in log
+            if args.app_test:
+                log=debug.read_text()
+                assert 'APP TEST FAILED' not in log
+                marker={1:'ON.: APP TEST repeated ELF launches, live allocation cleanup and full reclamation passed.',
+                        2:'ON.: APP TEST malformed ELF, real allocation rollback, retry and reclamation passed.',
+                        3:'ON.: APP TEST sustained ELF syscall load ready.'}[args.app_test]
+                assert marker in log.splitlines() and marker in serial_lines()
+                if args.app_test==1:
+                    assert 'ON.: APP TEST ELF execution, ABI, output, pointers, anonymous memory, yield, isolation and exit passed.' in log
+                    assert 'ON.: APP TEST loaded user fault and invalid syscall return containment passed.' in log
+                if args.app_test!=3:
+                    assert 'ON.APP: ABI/syscalls/ELF probe' in log.splitlines() and 'ON.APP: ABI/syscalls/ELF probe' in serial_lines()
+                    assert 'ON.APP: cross-page memory' in log.splitlines()
+                print('Verified ELF/syscall test mode '+str(args.app_test))
             if args.user_test:
                 log=debug.read_text()
                 assert 'USER TEST FAILED' not in log
@@ -404,6 +419,10 @@ def main():
                 keys(list('mem')+['ret']);wait_ui('ON.: command mem')
                 keys(list('heap')+['ret']);wait_ui('ON.: command heap')
                 keys(list('tasks')+['ret']);wait_ui('ON.: command tasks')
+                until=time.monotonic()+5
+                while 'ON.: total task dispatches=' not in debug.read_text() or 'ON.: total task dispatches=' not in '\n'.join(serial_lines()):
+                    if time.monotonic()>=until: raise RuntimeError('Incomplete task diagnostics')
+                    time.sleep(0.02)
                 log=debug.read_text()
                 assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log), 'Background task did not run during GUI interaction'
                 if 'ON.: FATAL CPU EXCEPTION' in debug.read_text(): raise RuntimeError('Desktop fatal exception')
@@ -659,6 +678,12 @@ def main():
                 (output / (prefix + '-registers.log')).write_text(registers)
                 status = execute('query-status')
                 assert status['status'] == 'running', status  # QEMU is live; guest CPU is halted.
+            if args.app_test==3:
+                log=debug.read_text()
+                for name in ['app-load-a','app-load-b']:
+                    matches=re.findall(r'ON\.: task [0-9]+ '+name+r' ready dispatches=([0-9]+) cpu_ticks=([0-9]+)',log)
+                    assert matches and any(int(d)>1 and int(c)>0 for d,c in matches), name+' did not run during desktop interaction'
+                print('Verified desktop/input/themes/windows under two loaded ELF applications issuing syscalls')
             if args.user_test==3:
                 log=debug.read_text()
                 for name in ['user-load-a','user-load-b']:

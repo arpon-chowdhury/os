@@ -47,7 +47,7 @@ void x86_idt_set_gate(unsigned int vector, uintptr_t handler, uint8_t ist) {
 
 void arch_cpu_init(void) {
     __asm__ volatile ("cli" : : : "memory");
-    /* SYSCALL remains disabled. Only the experimental exit interrupt is DPL3. */
+    /* SYSCALL remains disabled. Only exit and ABI v1 interrupt gates are DPL3. */
     uint32_t efer_low,efer_high;
     __asm__ volatile ("rdmsr" : "=a"(efer_low), "=d"(efer_high) : "c"(0xc0000080));
     efer_low &= ~1u;
@@ -79,6 +79,9 @@ void arch_cpu_init(void) {
     extern void x86_user_exit_interrupt(void);
     x86_idt_set_gate(128,(uintptr_t)x86_user_exit_interrupt,0);
     idt[128].attributes=0xee;
+    extern void x86_syscall_interrupt_entry(void);
+    x86_idt_set_gate(129,(uintptr_t)x86_syscall_interrupt_entry,0);
+    idt[129].attributes=0xee;
     const struct table_pointer gdtr = {sizeof(gdt) - 1, (uintptr_t)gdt};
     const struct table_pointer idtr = {sizeof(idt) - 1, (uintptr_t)idt};
     x86_load_gdt(&gdtr);

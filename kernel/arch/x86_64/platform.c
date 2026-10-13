@@ -18,8 +18,8 @@ void arch_debug_init(void) {
 }
 
 /* Debugcon plus COM1; a missing or stuck UART must not block the kernel. */
-void arch_debug_puts(const char *text) {
-    while (*text != '\0') {
+void arch_debug_write(const char *text,size_t length) {
+    while (length--) {
         uint8_t byte = (uint8_t)*text++;
         outb(0xe9, byte);
         for (unsigned int attempt = 0; attempt < 10000; ++attempt) {
@@ -31,6 +31,11 @@ void arch_debug_puts(const char *text) {
             }
         }
     }
+}
+
+void arch_debug_puts(const char *text) {
+    size_t length=0;while(text[length]) ++length;
+    arch_debug_write(text,length);
 }
 
 __attribute__((noreturn)) void arch_halt(void) {

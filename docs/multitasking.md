@@ -4,7 +4,7 @@ This stage adds actual independent kernel execution contexts. GUI windows remain
 retained surfaces owned by the foreground task; creating a window does not create
 a task or process. Kernel tasks run at CPL0 in the shared boot CR3. Isolated
 user tasks now run at CPL3 with owned roots and kernel entry stacks; see
-[Ring 3 and address spaces](user-mode.md). Executable loading remains future work.
+[Ring 3 and address spaces](user-mode.md). Strict static executable loading is described in [syscalls and loader](syscalls-and-loader.md).
 
 ## Running behavior
 
@@ -97,16 +97,16 @@ halting; there is no unsafe attempt to recover and continue other kernel tasks.
 
 See [Ring 3 and address spaces](user-mode.md) for the enabled privilege boundary,
 private roots, per-task TSS.RSP0, IRET entry, user fault termination and deferred
-cleanup. Kernel tasks still share trusted ring-0 mappings. General syscall entry
-and executable loading remain unimplemented; the experimental exit-only gate
-is separate from the reserved future syscall ABI.
+cleanup. Kernel tasks still share trusted ring-0 mappings. Versioned interrupt syscall entry and static ELF loading are implemented in
+[the next core phase](syscalls-and-loader.md); the earlier exit-only gate remains
+separate from ABI v1.
 
 ## Verification commands
 
 `make test-tasks` runs native ASan/UBSan policy/ownership tests with a modeled
 architecture switch and allocator: states, round-robin decisions, sleep deadlines,
 termination/reap, stale IDs, capacity, allocation failure, IF restoration,
-accounting, process cleanup and disabled general syscall contracts. This native model does not
+accounting, process cleanup and bounded syscall contracts and ELF transaction rollback. This native model does not
 execute or verify the x86 assembly switch.
 
 `make verify-tasks` builds isolated images for three modes under both BIOS and
@@ -129,7 +129,7 @@ responsive. Existing boot, exceptions, physical/virtual memory, heap, terminal,
 keyboard, mouse, graphics, desktop and window tests remain separate checks.
 No host settings, installations, physical disks or privileged host operations
 are needed. QEMU TCG x86-64 is the verified platform. Real hardware and SMP remain
-unverified; general application loading remains unimplemented.
+unverified. Static ON. ABI loading is implemented; broader application compatibility remains pending.
 
 ## Historical cooperative-stage results — 2026-10-13
 
@@ -194,6 +194,6 @@ in `build/preemption-final-gui.log`. Generated artifacts remain ignored.
 
 This completes the single-CPU QEMU scheduling phase only. Core Alpha is not yet
 release-ready. The subsequent user-isolation phase is now documented in [user-mode.md](user-mode.md);
-working syscalls/loaders, disk I/O, filesystem integrity, native applications and
+[syscalls and loading](syscalls-and-loader.md) are now implemented. Disk I/O, filesystem integrity, native application services and
 release stability work remain pending. No optional features or host macOS changes
 were made. Real hardware, SMP and latency guarantees remain unverified.
