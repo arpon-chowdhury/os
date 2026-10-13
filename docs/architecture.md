@@ -78,7 +78,7 @@ preserves the existing target triple, ISO layout, and QEMU TCG workflow.
    tested (see [the exception guide](exceptions.md)); legacy PIC/PIT interrupts are
    implemented (see [the interrupt guide](interrupts.md)). Physical allocation is
    implemented (see [the memory guide](memory.md)); [virtual memory](virtual-memory.md) is implemented while context
-   switching remains future work.
+   switching is now implemented cooperatively for kernel tasks; see [multitasking](multitasking.md).
 3. **Develop PC services:** device discovery, console, storage, filesystems,
    processes, system calls, and user space. Define a supported hardware profile
    as drivers become available; x86-64 CPU support does not mean every PC works.
@@ -104,7 +104,12 @@ input. `graphics.c` provides clipped pixel/rectangle/line/text/clear operations,
 packing, pitch, and pointer-aware writes. A subsequent retained UI layer now composites opaque surfaces with focus,
 input routing and theme tokens; see [ui-foundation.md](ui-foundation.md). A foreground desktop/window manager now adds independent retained windows, resize
 and lifecycle controls, a dock, and a read-only guest RTC clock; see
-[window-management.md](window-management.md). Filesystem services, multitasking
-and process isolation remain future work. The current
+[window-management.md](window-management.md). Cooperative kernel tasks now run
+on separate stacks; filesystem services, preemption, user processes and process
+isolation remain future work. The current
 capability audit and future visual/interaction specification are in
 [gui-design.md](gui-design.md).
+
+## Kernel task scheduling
+
+See [cooperative kernel tasks](multitasking.md). The single-CPU foreground GUI owns input/render state while a separate diagnostic task sleeps/yields on a guarded supervisor/NX stack. IRQs do not switch contexts. User descriptors, hardware syscall entry and process execution remain disabled; all kernel tasks share CR3.

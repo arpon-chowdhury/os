@@ -4,6 +4,7 @@
 #include "virtual.h"
 #include "heap.h"
 #include "terminal.h"
+#include "task.h"
 
 __attribute__((noreturn)) void kernel_main(bool boot_supported, const struct kernel_framebuffer *framebuffer, const struct boot_memory_map *memory) {
     if (boot_supported) {
@@ -32,6 +33,7 @@ __attribute__((noreturn)) void kernel_main(bool boot_supported, const struct ker
         (void)terminal_init(framebuffer);
         if (mouse_ready && framebuffer_pointer_init(framebuffer))
             arch_debug_puts("ON.: framebuffer mouse cursor ready.\n");
+        task_boot_start();
         arch_idle();
     }
     arch_halt();

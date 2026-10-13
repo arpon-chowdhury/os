@@ -57,7 +57,19 @@ ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST),0-0-0)
 $(error HEAP_TEST must run separately from other injections)
 endif
 endif
-MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)
+TASK_TEST ?= 0
+ifeq ($(filter $(TASK_TEST),0 1 2 3),)
+$(error TASK_TEST must be 0 through 3)
+endif
+ifneq ($(TASK_TEST),0)
+ifeq ($(filter build/%,$(BUILD)),)
+$(error TASK_TEST requires an isolated BUILD directory beneath build/)
+endif
+ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST),0-0-0-0)
+$(error TASK_TEST must run separately from other injections)
+endif
+endif
+MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)
 # Portable subsystems plus only the selected architecture.
 COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched -name '*.c' -type f))
 ARCH_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.c' -type f))
@@ -73,7 +85,7 @@ ifeq ($(filter build/%,$(BUILD)),)
 $(error EXCEPTION_TEST requires an isolated BUILD directory beneath build/)
 endif
 endif
-CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST)
+CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST)
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
 	-mno-red-zone -mcmodel=kernel -mgeneral-regs-only \
@@ -262,6 +274,8 @@ help:
 	@echo 'make verify-memory      Test PMM exhaustion and fallback under BIOS/UEFI'
 	@echo 'make test-heap          Run sanitized native heap safety and stress tests'
 	@echo 'make verify-heap        Test heap stress and rollback under BIOS/UEFI'
+	@echo 'make test-tasks         Run sanitized scheduler policy/ownership checks'
+	@echo 'make verify-tasks       Test real contexts, guards and rollback on BIOS/UEFI'
 	@echo 'make test-windows       Run sanitized window lifecycle and geometry checks'
 	@echo 'make verify-windows     Exercise multiple windows under BIOS and UEFI'
 	@echo 'make test-ui            Run sanitized retained UI and dirty redraw tests'
@@ -365,3 +379,17 @@ test-windows:
 verify-windows: check-ovmf $(ISO) test-windows
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/windows/bios" --timeout "$(BOOT_TIMEOUT)" --windows-test
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/windows/uefi" --timeout "$(UEFI_TIMEOUT)" --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-tasks verify-tasks
+test-tasks:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/sched/task.c kernel/sched/process.c tests/unit/task.c -o "$(BUILD)/tests/task"
+	"$(BUILD)/tests/task"
+
+verify-tasks: check-ovmf test-tasks
+	@set -eu; for mode in 1 2 3; do \
+		output="$(BUILD)/tasks/mode-$$mode"; mkdir -p "$$output"; \
+		$(MAKE) iso BUILD="$$output" TASK_TEST="$$mode" > "$$output/build.log" 2>&1 || { cat "$$output/build.log"; exit 1; }; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/bios" --timeout "$(UEFI_TIMEOUT)" --task-test "$$mode" --elf "$$output/kernel.elf" --nm "$(LLVM_NM)"; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/uefi" --timeout "$(UEFI_TIMEOUT)" --task-test "$$mode" --elf "$$output/kernel.elf" --nm "$(LLVM_NM)" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"; \
+	done

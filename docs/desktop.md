@@ -13,7 +13,8 @@ and Dark; Control also exposes Auto and Change wallpaper. Two original geometric
 wallpapers are rasterized procedurally, without external assets or file loading.
 Close hides and marks the retained tool closed; opening Control recreates its
 visible state, retaining appearance choices. Minimize preserves the same tool.
-These are foreground surfaces, with no scheduler, tasks or application processes.
+These are foreground GUI surfaces, not tasks or application processes.
+[Cooperative kernel tasks](multitasking.md) run separately from window management.
 
 Title bars drag and focus windows, with minus/square/cross controls for
 minimize, maximize/restore and close. All edges and corners resize windows. Window buttons retain Tab/Shift-Tab and Enter/Space access. F6 cycles
@@ -41,7 +42,7 @@ shell input; `ui.c` retains surfaces, controls, damage, focus and compositing;
 Original ON. bitmap typography and semantic theme tokens are shared throughout.
 
 Limitations: no bitmap wallpaper decoder/filesystem, persistent preferences,
-real application system, multitasking, translucency, animation,
+real application system, process isolation, preemptive scheduling, translucency, animation,
 double buffering, vsync, GPU acceleration, Unicode or scalable font rendering.
 Small displays use compact layouts. Full accessibility remains future work. Only QEMU x86-64 is tested, not physical PCs.
 

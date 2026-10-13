@@ -6,6 +6,7 @@
 #include "version.h"
 #include "graphics.h"
 #include "ui.h"
+#include "task.h"
 #define MAX_COLS 160u
 #define MAX_ROWS 64u
 #define LINE_BYTES 256u
@@ -68,10 +69,22 @@ static void command(void) {
     if(*args) { *args++=0; while(*args==' ') ++args; }
     arch_debug_puts("ON.: command "); arch_debug_puts(name); arch_debug_puts("\n");
     if(!*name) return;
-    if(equal(name,"help")) terminal_write("help clear echo version ticks mem heap graphics ui desktop\n");
+    if(equal(name,"help")) terminal_write("help clear echo version ticks mem heap graphics ui desktop tasks\n");
     else if(equal(name,"desktop")) { ui_active=desktop_open(&screen);demo_active=ui_active; }
     else if(equal(name,"ui")) { ui_active=ui_demo_open(&screen);demo_active=ui_active; }
     else if(equal(name,"graphics")) demo_active=graphics_demo(&screen);
+    else if(equal(name,"tasks")) {
+        struct task_info info[TASK_MAX];size_t n=task_list(info,TASK_MAX);
+        terminal_write("Cooperative kernel tasks (ring 0)\n");
+        static const char *states[]={"free","ready","running","sleeping","zombie","faulted"};
+        for(size_t i=0;i<n;++i) {
+            number(info[i].id);put(' ');terminal_write(info[i].name);terminal_write(" [");terminal_write(states[info[i].state]);terminal_write("]\n");
+            metric("  Dispatches: ",info[i].dispatches);
+            metric("  CPU samples (~100 Hz): ",info[i].cpu_ticks);
+            metric("  Idle samples: ",info[i].idle_ticks);
+        }
+        task_diagnostics();
+    }
     else if(equal(name,"clear")) clear();
     else if(equal(name,"echo")) { terminal_write(args); put('\n'); }
     else if(equal(name,"version")) terminal_write("ON. " ON_KERNEL_VERSION " (x86-64)\n");

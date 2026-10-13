@@ -5,6 +5,9 @@
 #include "arch.h"
 #include "heap.h"
 #include "memory.h"
+#include "task.h"
+size_t task_list(struct task_info *info,size_t capacity) {(void)info;(void)capacity;return 0;}
+void task_diagnostics(void) {}
 bool graphics_demo(const struct kernel_framebuffer *fb) { (void)fb;return true; }
 bool desktop_open(const struct kernel_framebuffer *fb) { (void)fb;return true; }
 bool ui_demo_open(const struct kernel_framebuffer *fb) { (void)fb;return true; }

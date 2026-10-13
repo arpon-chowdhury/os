@@ -4,6 +4,7 @@
 #include "virtual.h"
 #include "exceptions.h"
 #include "interrupts.h"
+#include "task.h"
 
 struct table_pointer { uint16_t limit; uint64_t base; } __attribute__((packed));
 struct idt_gate {
@@ -44,6 +45,11 @@ void x86_idt_set_gate(unsigned int vector, uintptr_t handler, uint8_t ist) {
 
 void arch_cpu_init(void) {
     __asm__ volatile ("cli" : : : "memory");
+    /* No user selectors or DPL3 gates exist; explicitly disable SYSCALL too. */
+    uint32_t efer_low,efer_high;
+    __asm__ volatile ("rdmsr" : "=a"(efer_low), "=d"(efer_high) : "c"(0xc0000080));
+    efer_low &= ~1u;
+    __asm__ volatile ("wrmsr" : : "a"(efer_low), "d"(efer_high), "c"(0xc0000080) : "memory");
     for (unsigned int i = 0; i < 4; ++i) tss.ist[i] = (uintptr_t)&x86_exception_stacks[i][sizeof(x86_exception_stacks[i])];
     tss.rsp[0] = tss.ist[3];
     tss.iomap = sizeof(tss); /* No I/O permission bitmap. */
@@ -92,6 +98,7 @@ __attribute__((noreturn)) void x86_exception_fatal(const struct exception_frame 
     arch_debug_puts("ON.: FATAL CPU EXCEPTION: ");
     arch_debug_puts(frame->vector < 32 ? names[frame->vector] : "Unknown");
     arch_debug_puts("\n");
+    task_fault_report();
     hex("handler_frame=", (uintptr_t)frame);
     hex("vector=", frame->vector);
     hex("error=", frame->error);

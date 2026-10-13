@@ -38,8 +38,9 @@ geometry changes, resize capture, lifecycle transitions, rounded hit testing,
 focus cycling, and shadow-aware invalidation. `ui.c` owns retained records,
 z-order, focused input routing and clipped composition. `desktop.c` owns shell
 layout and foreground-tool content. `ui_demo.c` constructs the scene, and
-`terminal.c` owns mode switching. These modules have no scheduler, address-space,
-process or application-lifetime APIs.
+`terminal.c` owns mode switching and reads task diagnostics. Window lifetimes
+do not own task, address-space, process or application lifetimes; the cooperative
+scheduler is a separate kernel module.
 
 Each window independently stores visibility, minimized/closed/maximized state,
 normal geometry, child controls and content identity. Maximize saves the exact
@@ -84,8 +85,9 @@ pointer-overlay save/restore behavior remains in the framebuffer backend.
 
 Limitations: CPU rasterization into the front buffer can tear. There is no
 per-window raster cache, alpha shadow, double buffering, vsync, GPU driver, modal
-window, snapping, animation, persistent layout, application registry, task
-scheduler or process isolation. Only the built-in foreground tools are provided.
+window, snapping, animation, persistent layout, application registry, preemptive
+scheduler or process isolation. Cooperative kernel tasks are now implemented
+separately; see [multitasking](multitasking.md). Only the built-in foreground tools are provided.
 At compact resolutions the dock may overlay the bottom of a window, and content
 is clipped when a window is too small to display it all. Physical hardware and
 full accessibility remain unverified.

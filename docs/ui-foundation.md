@@ -1,5 +1,7 @@
 # Retained UI foundation
 
+Cooperative kernel tasks now run separately from the foreground UI; see [multitasking](multitasking.md).
+
 Phase 3 builds on this preserved demonstration; see [interactive desktop](desktop.md) for the implemented shell, lifecycle controls and current limits.
 
 ON. remains the operating system's official name. Feature labels are Flow,

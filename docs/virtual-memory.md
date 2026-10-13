@@ -73,3 +73,7 @@ fallback, boot smoke test, and sanitized native allocator/renderer tests.
 Normal and VMM BIOS/UEFI welcome screenshots had identical SHA-256 hashes.
 The normal ELF had no undefined symbols. Logs are in
 `build/vmm-verification.log`, `build/vmm-regression.log`, and `build/vmm-faults.log`.
+
+## Kernel task stack mappings
+
+The cooperative scheduler maps per-task supervisor writable/NX stacks with unmapped guard pages in a separate high-half interval and releases them only from another context. All tasks still share this adopted CR3; guard pages and supervisor/NX leaves do not provide isolation between ring-0 tasks. See [multitasking](multitasking.md) for ownership, rollback tests and disabled user-process architecture.

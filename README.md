@@ -270,7 +270,7 @@ Opaque surfaces are recomposited only within clipped dirty regions. Shared
 theme tokens apply to windows, buttons, dock and top bar. Auto adapts to local
 time supplied by a future clock service; the current demo explicitly falls back
 to Dark because configured local civil time is unavailable. The desktop can separately show guest RTC firmware time. No host settings are read or
-changed, and no applications or multitasking are introduced.
+changed. The GUI remains a foreground owner; cooperative kernel tasks are now documented separately below.
 
 Run `make test-ui` for sanitized state/compositing checks and `make verify-ui`
 for BIOS/UEFI mouse, keyboard, palette and terminal-restoration tests.
@@ -279,3 +279,5 @@ See [ui-foundation.md](docs/ui-foundation.md) for APIs, limits and test details.
 Interactive shell: type `desktop` in the terminal. See [desktop controls and limitations](docs/desktop.md). Run `make verify-desktop` for BIOS/UEFI interaction checks and screenshots.
 
 Independent foreground windows: see [window management](docs/window-management.md). Run `make test-windows` and `make verify-windows` for sanitizer and BIOS/UEFI lifecycle/geometry tests.
+
+Cooperative kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). User-mode processes, hardware syscalls and private address spaces remain disabled.

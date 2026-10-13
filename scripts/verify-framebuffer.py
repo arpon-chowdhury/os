@@ -17,6 +17,7 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--task-test', type=int, choices=[1,2,3])
     parser.add_argument('--windows-test', action='store_true')
     parser.add_argument('--desktop-test', action='store_true')
     parser.add_argument('--ui-test', action='store_true')
@@ -35,7 +36,7 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test)) > 1:
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test)) > 1:
         parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
@@ -87,7 +88,7 @@ def main():
             deadline = time.monotonic() + args.timeout
             expected = ('ON.: framebuffer unavailable; screen skipped.' if args.no_framebuffer
                         else 'ON.: framebuffer welcome screen ready.')
-            if args.exception:
+            if args.exception or args.task_test==2:
                 expected = 'ON.: fatal exception halted safely.'
             else:
                 expected = 'ON.: system ticks reached 200.'
@@ -109,7 +110,7 @@ def main():
                 raise RuntimeError('Kernel entry diagnostic missing')
             if expected not in serial_lines() or handoff not in '\n'.join(serial_lines()):
                 raise RuntimeError('Expected kernel diagnostic missing from COM1 log')
-            if not args.exception and 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
+            if not args.exception and args.task_test!=2 and 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
                 raise RuntimeError('Unexpected fatal exception during normal boot')
             if args.exception:
                 log = debug.read_text()
@@ -136,7 +137,28 @@ def main():
                     assert fields['rax'] == 1 and fields['rcx'] == 0 and fields['rdx'] == 0, fields
                 assert 'ON.: framebuffer welcome screen ready.' in log
                 assert 'nested fatal' not in log and 'ERROR exception test returned' not in log
-            if not args.exception:
+            if args.task_test:
+                log=debug.read_text()
+                assert 'TASK TEST FAILED' not in log and 'ERROR terminated task resumed' not in log
+                if args.task_test==2:
+                    fields={key:int(value,16) for key,value in re.findall(r'^([a-z0-9_]+)=(0x[0-9a-f]+)$',log,re.MULTILINE)}
+                    assert fields['vector']==14 and fields['error']==2
+                    assert fields['cr2']==0xffffc80000006000 and fields['cs']==8 and fields['ss']==16
+                    assert 'ON.: fault in kernel task 257 guard-fault; shared kernel halted.' in log
+                    assert 'ON.: TASK TEST controlled stack guard write begins.' in log
+                    assert 'nested fatal' not in log
+                    assert 0xffffc80000007000 <= fields['rsp'] < 0xffffc8000000b000
+                    if args.elf:
+                        symbols={parts[2]:int(parts[0],16) for line in subprocess.check_output([args.nm,str(args.elf)],text=True).splitlines() if len(parts:=line.split())==3}
+                        ist=symbols['x86_exception_stacks']+3*16384
+                        assert ist<=fields['handler_frame']<ist+16384
+                else:
+                    markers=(['ON.: TASK TEST real contexts, callee registers, stack locals, sleep, return/exit and reclamation passed.',
+                              'ON.: TASK TEST capacity, stale IDs, termination, supervisor/NX guards and disabled user entry passed.'] if args.task_test==1 else
+                             ['ON.: TASK TEST partial stack allocation rollback and retry passed.'])
+                    for marker in markers: assert marker in log and marker in serial_lines()
+                print('Verified controlled kernel-task test mode '+str(args.task_test))
+            if not args.exception and args.task_test!=2:
                 memory_log = debug.read_text()
                 if 'PMM TEST FAILED' in memory_log:
                     raise RuntimeError('Physical memory test failed')
@@ -242,6 +264,14 @@ def main():
                         return response['return']
 
             execute('qmp_capabilities')
+            if args.task_test and args.task_test!=2:
+                for key in list('tasks')+['ret']:
+                    execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'});time.sleep(0.06)
+                time.sleep(0.2)
+                log=debug.read_text()
+                assert 'ON.: cooperative task diagnostics; user mode disabled.' in log
+                assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log)
+                execute('screendump', {'filename':str(output/'task-diagnostics.png'),'format':'png'})
             if args.desktop_test or args.windows_test:
                 def wait_ui(marker, start=0):
                     until=time.monotonic()+5
@@ -359,6 +389,9 @@ def main():
                 keys(['esc']);wait_ui('ON.: retained UI closed; terminal restored.')
                 keys(list('mem')+['ret']);wait_ui('ON.: command mem')
                 keys(list('heap')+['ret']);wait_ui('ON.: command heap')
+                keys(list('tasks')+['ret']);wait_ui('ON.: command tasks')
+                log=debug.read_text()
+                assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log), 'Background task did not run during GUI interaction'
                 if 'ON.: FATAL CPU EXCEPTION' in debug.read_text(): raise RuntimeError('Desktop fatal exception')
                 if args.windows_test: print('Verified multiple-window focus, reverse switching, resize, maximize/restore, independent close and dock/launcher restore')
                 print('Verified desktop themes, wallpaper, drag, minimize, search, close, restore, and terminal memory commands')
@@ -606,7 +639,7 @@ def main():
                 if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
                     raise RuntimeError('Keyboard caused a fatal exception')
                 print('Verified IRQ1 keyboard input, Shift release, Enter, Backspace, and continued delivery')
-            if args.exception:
+            if args.exception or args.task_test==2:
                 registers = execute('human-monitor-command', {'command-line': 'info registers'})
                 assert 'HLT=1' in registers, registers
                 (output / (prefix + '-registers.log')).write_text(registers)
@@ -616,7 +649,7 @@ def main():
             if not screenshot.is_file() or screenshot.stat().st_size == 0:
                 raise RuntimeError('QEMU did not produce a screenshot')
             print('Verified ' + (args.exception + ' fatal exception, saved frame, IST stack, and halted CPU; ' if args.exception else '') +
-                  ('physical memory, timer, ' if not args.exception else '') + 'framebuffer and COM1 diagnostics; screenshot: ' + str(screenshot))
+                  ('physical memory, timer, ' if not args.exception and args.task_test!=2 else '') + 'framebuffer and COM1 diagnostics; screenshot: ' + str(screenshot))
         finally:
             if process.poll() is None:
                 process.terminate()

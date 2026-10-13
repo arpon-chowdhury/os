@@ -5,6 +5,7 @@
 #include "keyboard.h"
 #include "terminal.h"
 #include "mouse.h"
+#include "task.h"
 
 #define PIC_MASTER 0x20
 #define PIC_SLAVE 0xa0
@@ -57,6 +58,7 @@ void x86_irq_dispatch(const struct exception_frame *frame) {
 static void timer_irq(const struct exception_frame *frame) {
     (void)frame;
     ++system_ticks;
+    task_tick();
 }
 
 uint64_t arch_system_ticks(void) {
@@ -102,7 +104,9 @@ __attribute__((noreturn)) void arch_idle(void) {
     unsigned int reports = 0;
     for (;;) {
         /* STI's interrupt shadow makes the enable-and-sleep sequence atomic. */
+        task_idle_mark(true);
         __asm__ volatile ("sti; hlt; cli" : : : "memory");
+        task_idle_mark(false);
         /* Foreground drawing and commands must not stall IRQ1 or the PIT. */
         __asm__ volatile ("sti" : : : "memory");
         struct keyboard_event event;
@@ -137,6 +141,7 @@ __attribute__((noreturn)) void arch_idle(void) {
                                          "ON.: system ticks reached 200.\n");
             ++reports;
         }
+        task_yield();
         __asm__ volatile ("cli" : : : "memory");
     }
 }

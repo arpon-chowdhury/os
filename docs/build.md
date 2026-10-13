@@ -362,3 +362,7 @@ Normal builds use `HEAP_TEST=0`; injected modes require isolated build directori
 ## Foreground window checks
 
 `make test-windows` runs native ASan/UBSan geometry, lifecycle, capacity and dirty-composition tests. `make verify-windows` boots BIOS and UEFI, exercises independent desktop windows, and captures PNGs under `$(BUILD)/windows/{bios,uefi}`. See [window management](window-management.md) for controls, ownership and limitations.
+
+## Kernel task checks
+
+`make test-tasks` uses native sanitizers and a modeled context-switch hook. `make verify-tasks` builds isolated `TASK_TEST=1`, `2`, `3` images and checks BIOS/UEFI real contexts, expected guard faults, and allocation rollback. Task mode is part of object/build-mode keys and must not be combined with other fault injections. See [multitasking](multitasking.md).
