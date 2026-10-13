@@ -328,7 +328,7 @@ Virtual memory translation, mapping, permissions, and TLB invalidation are
 implemented; see the [virtual memory guide](virtual-memory.md). PS/2 input, kernel scheduling and isolated user execution are also implemented;
 see [multitasking](multitasking.md) and [user mode](user-mode.md). Bounded
 syscalls, static ELF loading and bounded ATA storage are implemented; filesystem
-services remain pending. See
+application services remain pending; a bounded VFS/ONFS layer is implemented. See
 [syscalls and loader](syscalls-and-loader.md) and [storage](storage.md) for build commands, verification and limits.
 
 ## Exception builds and tests
@@ -397,5 +397,15 @@ disposable raw disks below `build/storage/`, and verifies BIOS/UEFI I/O, flush,
 reboot persistence, failure containment, slave-only selection and desktop stress.
 Installed OVMF code and variable templates are read-only inputs. The default
 QEMU q35 AHCI boot controller is unsupported; tests attach `piix3-ide` alongside
-it. Normal images never enable disk writes. See [storage](storage.md) for actual
-results and the filesystem integrity work still required.
+it. Normal images never enable disk writes. See [storage](storage.md) and
+[filesystem](filesystem.md) for actual results and remaining integrity limits.
+
+## Filesystem layer checks (requested Phase 10)
+
+`make test-fs` runs sanitized VFS/ONFS operations, semantic corruption, capacity
+and interrupted-commit tests. `make verify-fs` creates new exclusive disposable
+images under a fresh `build/filesystem/run-*` directory and runs BIOS/UEFI
+`FS_TEST=1..7` fixtures, including persistence, corruption, VM kill/recovery and
+desktop interaction. No existing raw image is formatted. `latest-run.txt` points
+to the last complete verification record. See [filesystem](filesystem.md) for
+format details, actual results and the physical power-loss limits.

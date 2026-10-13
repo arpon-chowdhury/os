@@ -1,3 +1,5 @@
+> Historical Phase 4 record. The subsequent [filesystem layer](filesystem.md), requested as Phase 10, now provides bounded kernel file/directory APIs and snapshot metadata updates. Application file services and physical power-loss safety remain pending.
+
 # Phase 4: bounded storage and disk I/O
 
 ON. OS has a lightweight ATA PIO driver and a kernel-only block service. This

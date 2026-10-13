@@ -29,8 +29,8 @@ mapping, permissions, and TLB invalidation while preserving boot mappings; see t
 [virtual memory guide](docs/virtual-memory.md). The [kernel heap](docs/heap.md)
 provides safe allocation, alignment, coalescing, and statistics. Preemptive kernel tasks, PS/2 input and a retained desktop are implemented;
 isolated user execution, bounded syscalls and strict static ELF loading are
-implemented. Bounded ATA storage is implemented; a reliable filesystem remains
-future work. See [storage scope and verification](docs/storage.md).
+implemented. Bounded ATA storage and a kernel VFS/ONFS filesystem layer are
+implemented. See [storage](docs/storage.md) and [filesystem scope and verification](docs/filesystem.md).
 
 ## Build and run
 
@@ -284,7 +284,7 @@ Independent foreground windows: see [window management](docs/window-management.m
 
 Preemptive kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). Isolated user tasks, bounded ABI v1 syscalls and strict static ELF loading are implemented. See [user execution](docs/user-mode.md).
 
-Core Alpha work follows the [ordered release gates](docs/architecture.md#on-os-core-alpha-release-order). The syscall/loader phase is verified; the verified storage phase is documented in [storage and disk I/O](docs/storage.md); optional features wait until the core is stable.
+Core Alpha work follows the [ordered release gates](docs/architecture.md#on-os-core-alpha-release-order). The syscall/loader phase is verified; the storage phase is verified and the current filesystem request is documented in [filesystem](docs/filesystem.md); optional features wait until the core is stable.
 
 Run `make test-address-spaces`, `make verify-user`, and `make verify-user-load`
 for native ownership checks, BIOS/UEFI isolation/fault/rollback tests and desktop
@@ -297,4 +297,10 @@ and full application compatibility remain pending.
 Bounded storage: run `make test-storage` and `make verify-storage` for sanitized
 ATA/block safety, BIOS/UEFI disposable-disk writes, flush/reboot persistence,
 error containment and desktop interaction during background reads. Normal boot
-keeps writes disabled. No filesystem or application disk access is implemented.
+keeps writes disabled. The VFS/ONFS layer is available to trusted kernel callers; application disk access remains pending.
+
+Filesystem layer (requested Phase 10): `make test-fs` and `make verify-fs` check
+file/directory operations, snapshot consistency, corruption, full volumes,
+interrupted updates and reboot persistence on new disposable QEMU images.
+Normal boot does not mount or format a volume. Physical power-loss safety and
+application/file-manager integration remain unverified or pending.

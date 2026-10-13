@@ -107,7 +107,7 @@ and lifecycle controls, a dock, and a read-only guest RTC clock; see
 [window-management.md](window-management.md). Preemptive kernel tasks now run
 on separate stacks; isolated user execution is described in [user-mode.md](user-mode.md),
 and static executable loading in [syscalls-and-loader.md](syscalls-and-loader.md).
-Bounded ATA storage is described in [storage.md](storage.md). Filesystem services remain future work. The current
+Bounded ATA storage is described in [storage.md](storage.md). The bounded filesystem layer is described in [filesystem.md](filesystem.md); application file services remain future work. The current
 capability audit and future visual/interaction specification are in
 [gui-design.md](gui-design.md).
 
@@ -118,7 +118,7 @@ See [preemptive kernel tasks](multitasking.md). The single-CPU foreground GUI ow
 ## ON. OS Core Alpha release order
 
 Complete and verify each phase before implementing the next. The current phase
-was storage and disk I/O and is verified; see [implementation and verification](storage.md). Existing
+is the filesystem layer (the user-requested Phase 10); see [implementation and verification](filesystem.md). Existing
 Windows 11 + macOS-inspired desktop, adaptive theme tokens and bottom dock stay
 in place. The graphical demo is not yet a usable Core Alpha release.
 
@@ -128,10 +128,11 @@ in place. The graphical demo is not yet a usable Core Alpha release.
    kernel mappings, validated privilege transitions and isolated fault teardown.
 3. Working syscalls and application loading (verified): bounded user copies, validated
    executable images and resource ownership.
-4. Storage drivers and bounded disk I/O (verified current phase) against disposable QEMU
+4. Storage drivers and bounded disk I/O (verified) against disposable QEMU
    disk images; read-only defaults, explicit flush and contained errors.
-5. Reliable filesystem: validated metadata, safe operations, failure recovery
-   and integrity tests before writes become a release capability.
+5. Filesystem layer (current work, requested as Phase 10): bounded VFS/ONFS,
+   snapshot metadata updates, corruption and recovery tests. Physical power-loss
+   safety and general persistent application/file-manager services remain release gates.
 6. Basic native application framework separated from kernel, drivers and services.
 7. Functional desktop, file manager and essential settings using those services.
 8. Performance, crash handling and stability testing for Core Alpha release.

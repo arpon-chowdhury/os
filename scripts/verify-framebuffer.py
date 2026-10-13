@@ -8,6 +8,7 @@ import select
 import shutil
 from pathlib import Path
 import subprocess
+import tempfile
 import time
 
 
@@ -17,6 +18,7 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--fs-test', type=int, choices=[1,2,3,4,5,6,7])
     parser.add_argument('--storage-test', type=int, choices=[1,2,3,4,5])
     parser.add_argument('--storage-image', type=Path)
     parser.add_argument('--storage-readonly', action='store_true')
@@ -41,7 +43,7 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test, args.app_test, args.storage_test)) > 1:
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test, args.app_test, args.storage_test, args.fs_test)) > 1:
         parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
@@ -52,8 +54,10 @@ def main():
     for firmware in (args.ovmf_code, args.ovmf_vars):
         if firmware and not firmware.is_file():
             parser.error('Missing OVMF firmware: ' + str(firmware))
-    if args.storage_image and (not args.storage_test or not args.storage_image.is_file()):
+    if args.storage_image and (not (args.storage_test or args.fs_test) or not args.storage_image.is_file()):
         parser.error('--storage-image requires a storage test and an existing regular image')
+    if args.fs_test and not args.storage_image:
+        parser.error('filesystem tests require a dedicated disposable image')
     if args.storage_test and args.storage_test!=3 and not args.storage_image:
         parser.error('this storage mode requires a disposable image')
     if args.storage_test==3 and args.storage_image:
@@ -109,11 +113,14 @@ def main():
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=errors)
         try:
-            deadline = time.monotonic() + args.timeout
+            started = time.monotonic()
+            deadline = started + args.timeout
             expected = ('ON.: framebuffer unavailable; screen skipped.' if args.no_framebuffer
                         else 'ON.: framebuffer welcome screen ready.')
             if args.exception or args.task_test==2:
                 expected = 'ON.: fatal exception halted safely.'
+            elif args.fs_test==6:
+                expected = 'ON.: FS TEST crash point after inactive payload write reached.'
             else:
                 expected = 'ON.: system ticks reached 200.'
             handoff = 'ON.: Limine handoff OK; x86-64 kernel entered.'
@@ -125,11 +132,27 @@ def main():
             while time.monotonic() < deadline:
                 if process.poll() is not None:
                     raise RuntimeError('QEMU exited before the expected diagnostic')
-                if expected in debug.read_text().splitlines() and expected in serial_lines():
+                debug_lines = debug.read_text().splitlines()
+                if args.user_test and any('USER TEST FAILED' in line for line in debug_lines):
+                    raise RuntimeError('Kernel user-mode selftest failed; inspect ' + str(debug))
+                if args.fs_test and any('FS TEST FAILED' in line for line in debug_lines):
+                    raise RuntimeError('Kernel filesystem selftest failed; inspect ' + str(debug))
+                if not args.exception and args.task_test != 2 and any(
+                        'ON.: FATAL CPU EXCEPTION' in line for line in debug_lines):
+                    raise RuntimeError('Unexpected fatal kernel exception; inspect ' + str(debug))
+                if expected in debug_lines and expected in serial_lines():
                     break
                 time.sleep(0.1)
             else:
-                raise RuntimeError('Timed out; inspect ' + str(debug))
+                missing = [name for name, lines in
+                           (('debugcon', debug.read_text().splitlines()), ('COM1', serial_lines()))
+                           if expected not in lines]
+                raise RuntimeError(f'Timed out after {time.monotonic() - started:.2f}s '
+                                   f'waiting for {expected!r} in {", ".join(missing)}; inspect {debug}')
+            (output / (prefix + '-boot-timing.json')).write_text(json.dumps({
+                'command': command, 'timeout_seconds': args.timeout,
+                'expected': expected, 'diagnostic_seconds': time.monotonic() - started,
+            }, indent=2) + '\n')
             if handoff not in debug.read_text().splitlines():
                 raise RuntimeError('Kernel entry diagnostic missing')
             if expected not in serial_lines() or handoff not in '\n'.join(serial_lines()):
@@ -161,6 +184,18 @@ def main():
                     assert fields['rax'] == 1 and fields['rcx'] == 0 and fields['rdx'] == 0, fields
                 assert 'ON.: framebuffer welcome screen ready.' in log
                 assert 'nested fatal' not in log and 'ERROR exception test returned' not in log
+            if args.fs_test:
+                log=debug.read_text()
+                marker={1:'ON.: FS TEST directories, create/open/read/write/delete, boundaries and allocation-free operations passed.',
+                        2:'ON.: FS TEST persistent files after reboot passed.',
+                        3:'ON.: FS TEST corrupted metadata rejected without writes passed.',
+                        4:'ON.: FS TEST interrupted snapshot recovery read-only passed.',
+                        5:'ON.: FS TEST full data/node capacity, delete and reuse passed.',
+                        6:'ON.: FS TEST crash point after inactive payload write reached.',
+                        7:'ON.: FS TEST write failure and poisoned volume containment passed.'}[args.fs_test]
+                assert 'FS TEST FAILED' not in log
+                assert marker in log.splitlines() and marker in serial_lines()
+                print('Verified filesystem test mode '+str(args.fs_test))
             if args.storage_test:
                 log=debug.read_text()
                 marker={1:'ON.: STORAGE TEST bounded reads, writes, flush, boundaries and repeated I/O passed.',
@@ -219,7 +254,7 @@ def main():
                              ['ON.: TASK TEST partial stack allocation rollback and retry passed.'])
                     for marker in markers: assert marker in log and marker in serial_lines()
                 print('Verified controlled kernel-task test mode '+str(args.task_test))
-            if not args.exception and args.task_test!=2:
+            if not args.exception and args.task_test!=2 and args.fs_test!=6:
                 memory_log = debug.read_text()
                 if 'PMM TEST FAILED' in memory_log:
                     raise RuntimeError('Physical memory test failed')
@@ -704,12 +739,17 @@ def main():
                 if 'ON.: FATAL CPU EXCEPTION' in debug.read_text():
                     raise RuntimeError('Keyboard caused a fatal exception')
                 print('Verified IRQ1 keyboard input, Shift release, Enter, Backspace, and continued delivery')
-            if args.exception or args.task_test==2:
+            if args.exception or args.task_test==2 or args.fs_test==6:
                 registers = execute('human-monitor-command', {'command-line': 'info registers'})
                 assert 'HLT=1' in registers, registers
                 (output / (prefix + '-registers.log')).write_text(registers)
                 status = execute('query-status')
                 assert status['status'] == 'running', status  # QEMU is live; guest CPU is halted.
+            if args.fs_test==1 and args.windows_test:
+                matches=re.findall(r'ON\.: task [0-9]+ filesystem-reader ready dispatches=([0-9]+)',debug.read_text())
+                assert matches and any(int(n)>1 for n in matches)
+                assert 'FS TEST FAILED' not in debug.read_text()
+                print('Verified desktop/input/themes/windows during background filesystem reads')
             if args.storage_test==1 and args.windows_test:
                 log=debug.read_text()
                 matches=re.findall(r'ON\.: task [0-9]+ storage-reader ready dispatches=([0-9]+)',log)
@@ -732,7 +772,22 @@ def main():
             if not screenshot.is_file() or screenshot.stat().st_size == 0:
                 raise RuntimeError('QEMU did not produce a screenshot')
             print('Verified ' + (args.exception + ' fatal exception, saved frame, IST stack, and halted CPU; ' if args.exception else '') +
-                  ('physical memory, timer, ' if not args.exception and args.task_test!=2 else '') + 'framebuffer and COM1 diagnostics; screenshot: ' + str(screenshot))
+                  ('physical memory, timer, ' if not args.exception and args.task_test!=2 and args.fs_test!=6 else '') + 'framebuffer and COM1 diagnostics; screenshot: ' + str(screenshot))
+            if args.fs_test==6:
+                process.kill();process.wait(timeout=5)
+                print('Killed QEMU at the controlled interrupted filesystem update')
+        except Exception as failure_error:
+            # Keep failed-run evidence even when a later invocation reuses output.
+            failure = Path(tempfile.mkdtemp(prefix=prefix + '-failure-', dir=output))
+            for artifact in (debug, serial, output / (prefix + '-qemu.log')):
+                shutil.copyfile(artifact, failure / artifact.name)
+            (failure / 'command.json').write_text(json.dumps(command, indent=2) + '\n')
+            (failure / 'failure.json').write_text(json.dumps({
+                'error': str(failure_error), 'timeout_seconds': args.timeout,
+                'elapsed_seconds': time.monotonic() - started, 'expected': expected,
+            }, indent=2) + '\n')
+            print('Failed-run evidence preserved: ' + str(failure), flush=True)
+            raise
         finally:
             if process.poll() is None:
                 process.terminate()
