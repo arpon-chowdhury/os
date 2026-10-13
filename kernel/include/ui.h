@@ -21,7 +21,7 @@ struct ui_button {
     bool stretch;
 };
 struct ui_surface {
-    bool visible;
+    bool visible, retired;
     bool minimized, closed, maximized;
     struct ui_rect restore_bounds;
     unsigned int kind;
@@ -35,6 +35,7 @@ struct ui_surface {
 /* Retained opaque display lists, single foreground owner, no allocation.
    Bounds are in pixels. Child button bounds are relative to the surface. */
 struct ui {
+    void (*application_content)(struct ui *, int);
     struct graphics graphics;
     struct ui_surface surfaces[UI_MAX_SURFACES];
     unsigned int order[UI_MAX_SURFACES], count;
@@ -82,4 +83,5 @@ bool ui_demo_open(const struct kernel_framebuffer *fb);
 void ui_demo_keyboard(const struct keyboard_event *event);
 void ui_demo_mouse(const struct mouse_event *event);
 void ui_demo_render(void);
+void ui_demo_close(void);
 #endif

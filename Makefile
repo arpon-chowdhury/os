@@ -443,7 +443,7 @@ verify-windows: check-ovmf $(ISO) test-windows
 .PHONY: test-tasks verify-tasks
 test-tasks:
 	@mkdir -p "$(BUILD)/tests"
-	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/sched/task.c kernel/sched/process.c kernel/mm/address_space.c kernel/exec/elf.c kernel/services/syscall.c tests/address_model.c tests/unit/task.c -o "$(BUILD)/tests/task"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/sched/task.c kernel/sched/process.c kernel/mm/address_space.c kernel/exec/elf.c kernel/services/syscall.c kernel/services/application.c tests/address_model.c tests/unit/task.c -o "$(BUILD)/tests/task"
 	"$(BUILD)/tests/task"
 
 verify-tasks: check-ovmf test-tasks
@@ -530,3 +530,19 @@ test-fs:
 	"$(BUILD)/tests/onfs"
 verify-fs: check-ovmf test-fs
 	$(PYTHON) scripts/verify-fs.py --qemu "$(QEMU)" --make "$(MAKE)" --build "$(BUILD)/filesystem" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --timeout "$(UEFI_TIMEOUT)"
+
+CPPFLAGS += -DON_NATIVE_SAMPLE_PATH='"$(BUILD)/apps/sample.elf"'
+$(BUILD)/apps/sample.o: apps/native/sample.c include/on/application.h include/on/syscall.h
+	@mkdir -p "$(dir $@)"
+	$(CC) --target=x86_64-unknown-none-elf -Iinclude -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mgeneral-regs-only -O2 -Wall -Wextra -Werror -c "$<" -o "$@"
+$(BUILD)/obj/mode-$(MODE)/kernel/arch/x86_64/app_images.o: $(BUILD)/apps/sample.elf
+apps: $(BUILD)/apps/sample.elf
+.PHONY: verify-native
+verify-native: check-ovmf $(ISO)
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/native/bios" --timeout "$(BOOT_TIMEOUT)" --native-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(ISO)" "$(BUILD)/native/uefi" --timeout "$(UEFI_TIMEOUT)" --native-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+.PHONY: test-native
+test-native:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include -Iinclude kernel/services/application.c tests/unit/application.c -o "$(BUILD)/tests/application"
+	"$(BUILD)/tests/application"

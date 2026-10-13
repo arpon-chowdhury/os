@@ -18,3 +18,8 @@ app_load_start: .incbin ON_APP_LOAD_PATH
 app_load_end:
 #endif
 .section .note.GNU-stack,"",@progbits
+.section .rodata
+.balign 16
+.global native_sample_start,native_sample_end
+native_sample_start: .incbin ON_NATIVE_SAMPLE_PATH
+native_sample_end:

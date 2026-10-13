@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--app-test', type=int, choices=[1,2,3])
     parser.add_argument('--user-test', type=int, choices=[1,2,3])
     parser.add_argument('--task-test', type=int, choices=[1,2,3])
+    parser.add_argument('--native-test', action='store_true')
     parser.add_argument('--windows-test', action='store_true')
     parser.add_argument('--desktop-test', action='store_true')
     parser.add_argument('--ui-test', action='store_true')
@@ -368,7 +369,7 @@ def main():
                 assert 'ON.: preemptive task diagnostics; isolated user execution available.' in log
                 assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log)
                 execute('screendump', {'filename':str(output/'task-diagnostics.png'),'format':'png'})
-            if args.desktop_test or args.windows_test:
+            if args.desktop_test or args.windows_test or args.native_test:
                 def wait_ui(marker, start=0):
                     until=time.monotonic()+5
                     while marker not in debug.read_text().splitlines()[start:]:
@@ -482,6 +483,46 @@ def main():
                     start=len(debug.read_text().splitlines());keys(['ret'])
                     wait_ui('ON.: desktop Palette opened.',start)
                     shot('windows-final')
+                if args.native_test:
+                    start=len(debug.read_text().splitlines());keys(['f5'])
+                    wait_ui('ON.: native application window ready.',start)
+                    shot('native-ring3')
+                    pixels=output/'native-pixels.ppm'
+                    execute('screendump', {'filename':str(pixels)})
+                    header,pwph,maxval,data=pixels.read_bytes().split(b'\n',3)
+                    pw,ph=map(int,pwph.split())
+                    assert header==b'P6' and maxval==b'255'
+                    assert any(data[(yy*pw+xx)*3:(yy*pw+xx)*3+3]==bytes([0x72,0xc9,0xff])
+                               for yy in range(120,128) for xx in range(96,210)), 'Native text not rendered'
+                    start=len(debug.read_text().splitlines());keys(['f7'])
+                    wait_ui('ON.: window minimized Native sample',start)
+                    move(w//2+105,h-64);button(True);button(False)
+                    wait_ui('ON.: window restored.')
+                    keys(['f8']);wait_ui('ON.: window maximized.')
+                    keys(['f8']);wait_ui('ON.: window geometry restored.')
+                    start=len(debug.read_text().splitlines());keys(['x'])
+                    wait_ui('ON.: native key consumed.',start)
+                    move(110,130);button(True);button(False)
+                    wait_ui('ON.: native mouse consumed.')
+                    start=len(debug.read_text().splitlines());keys(['q'])
+                    wait_ui('ON.: native window cleaned.',start)
+                    start=len(debug.read_text().splitlines());keys(['f5'])
+                    wait_ui('ON.: native application window ready.',start)
+                    start=len(debug.read_text().splitlines());keys(['c'])
+                    wait_ui('ON.: user application fault reclaimed.',start)
+                    wait_ui('ON.: native window cleaned.',start)
+                    start=len(debug.read_text().splitlines());keys(['f5'])
+                    wait_ui('ON.: native application window ready.',start)
+                    start=len(debug.read_text().splitlines());keys(['f5'])
+                    wait_ui('ON.: native application window ready.',start)
+                    shot('native-independent')
+                    start=len(debug.read_text().splitlines());keys(['q'])
+                    wait_ui('ON.: native window cleaned.',start)
+                    start=len(debug.read_text().splitlines());keys(['x'])
+                    wait_ui('ON.: native key consumed.',start)
+                    start=len(debug.read_text().splitlines());keys(['f9'])
+                    wait_ui('ON.: native window cleaned.',start)
+                    print('Verified native windows, input, exit, crash cleanup and independent instances')
                 keys(['esc']);wait_ui('ON.: retained UI closed; terminal restored.')
                 keys(list('mem')+['ret']);wait_ui('ON.: command mem')
                 keys(list('heap')+['ret']);wait_ui('ON.: command heap')

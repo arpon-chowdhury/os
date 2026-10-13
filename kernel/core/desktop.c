@@ -33,6 +33,7 @@ static bool inside(struct ui_rect r,int x,int y) {
     return x>=r.x && y>=r.y && x<r.x+r.w && y<r.y+r.h;
 }
 static bool matches(struct ui *u,int id) {
+    if(u->surfaces[id].retired) return false;
     const char *name=u->surfaces[id].title;
     for(unsigned i=0;i<u->search_length;++i) {
         char c=u->search[i],n=name[i];
@@ -42,6 +43,9 @@ static bool matches(struct ui *u,int id) {
         if(c!=n) return false;
     }
     return true;
+}
+static unsigned live_windows(struct ui *u) {
+    unsigned n=0;for(unsigned i=0;i<u->count;++i) if(!u->surfaces[i].retired) ++n;return n;
 }
 static int target(struct ui *u,int x,int y) {
     int w=u->graphics.fb.width,h=u->graphics.fb.height;
@@ -62,8 +66,14 @@ static int target(struct ui *u,int x,int y) {
         return 5;
     }
     if(u->count && inside((struct ui_rect){w/2-140,h-76,280,28},x,y)) {
-        int id=(x-(w/2-140))*u->count/280;
-        return 40+(id>=(int)u->count?(int)u->count-1:id);
+        unsigned count=live_windows(u);
+        if(!count) return -1;
+        unsigned position=(x-(w/2-140))*count/280;
+        for(unsigned id=0;id<u->count;++id) if(!u->surfaces[id].retired) {
+            if(!position) return 40+id;
+            --position;
+        }
+        return -1;
     }
     int id=wm_hit(u,x,y);
     if(id>=0) {
@@ -183,9 +193,12 @@ void desktop_overlay(struct ui *u) {
     }
     if(u->count) {
         struct ui_rect tasks={d.x,h-76,280,28};panel(u,tasks,u->tokens.raised);
+        unsigned position=0,count=live_windows(u);
         for(unsigned id=0;id<u->count;++id) {
             struct ui_surface *s=&u->surfaces[id];
-            int x=tasks.x+id*280/u->count,ww=(id+1)*280/u->count-id*280/u->count;
+            if(s->retired) continue;
+            int x=tasks.x+position*280/count,ww=(position+1)*280/count-position*280/count;
+            ++position;
             if(u->shell_hover==40+(int)id) panel(u,(struct ui_rect){x+2,tasks.y+2,ww-4,24},u->tokens.surface);
             int cx=g->clip_x,cy=g->clip_y,cw=g->clip_w,ch=g->clip_h;
             int left=x>cx?x:cx,right=x+ww<cx+cw?x+ww:cx+cw;

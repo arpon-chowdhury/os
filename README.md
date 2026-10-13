@@ -304,3 +304,13 @@ file/directory operations, snapshot consistency, corruption, full volumes,
 interrupted updates and reboot persistence on new disposable QEMU images.
 Normal boot does not mount or format a volume. Physical power-loss safety and
 application/file-manager integration remain unverified or pending.
+
+### Phase 11 native application framework
+
+The desktop can launch independent Ring 3 ELF applications through a bounded
+native window ABI. In `desktop`, press F5 for the sample; type q to exit or c to
+exercise crash containment. Existing themes, window controls and bottom dock
+manage application windows. See [native application ABI and verification](docs/native-applications.md).
+Run `make test-native verify-native` for service sanitizer tests and BIOS/UEFI
+window/input/lifecycle checks. This is a minimal ON. ABI, not full desktop
+application compatibility.

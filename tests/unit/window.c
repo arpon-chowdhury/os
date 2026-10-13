@@ -78,6 +78,8 @@ int main(void) {
     for(unsigned i=u.count;i<UI_MAX_SURFACES;++i) assert(ui_window(&u,"Extra",(struct ui_rect){10,30,120,90})>=0);
     assert(ui_window(&u,"Overflow",(struct ui_rect){10,30,120,90})==-1);
     wm_resize(NULL,0,(struct ui_rect){0,0,0,0});wm_close(&u,99);wm_restore(&u,-1);wm_maximize(NULL,0);wm_cycle(NULL,false);
+    wm_close(&u,a);u.surfaces[a].retired=true;wm_restore(&u,a);
+    assert(!u.surfaces[a].visible && u.surfaces[a].closed);
     equivalent();free(reference);free(pixels);
     puts("Window lifecycle, overlapping hit tests, cycling, all resize edges, maximize geometry, capture cancellation, fixed capacity, dirty/full equivalence and guards passed.");
 }

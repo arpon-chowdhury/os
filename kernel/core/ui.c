@@ -383,6 +383,7 @@ static void surface(struct ui *u, int id) {
             }
         }
         desktop_content(u,id);
+        if(u->application_content) u->application_content(u,id);
         if(!s->maximized) {
             graphics_line(g,s->bounds.x+s->bounds.w-14,s->bounds.y+s->bounds.h-5,s->bounds.x+s->bounds.w-5,s->bounds.y+s->bounds.h-14,u->tokens.muted);
             graphics_line(g,s->bounds.x+s->bounds.w-9,s->bounds.y+s->bounds.h-5,s->bounds.x+s->bounds.w-5,s->bounds.y+s->bounds.h-9,u->tokens.muted);

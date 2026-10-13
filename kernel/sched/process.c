@@ -2,6 +2,7 @@
 #include "syscall.h"
 #include "arch.h"
 #include "elf.h"
+#include "application.h"
 bool process_user_layout_valid(const struct process_user_layout *p) {
     const uintptr_t limit=UINT64_C(0x0000800000000000);
     return p && p->entry>=4096 && p->entry<limit &&
@@ -24,10 +25,13 @@ static void enter(void *argument) {
 }
 static void cleanup(void *argument) {
     struct process *p=argument;
+    application_cleanup(p->result.id);
     if(!address_space_destroy(&p->space)) arch_halt();
     /* Cancellation is distinct from a user exit or fault. */
     if(!p->result.finished) {p->result.finished=true;p->result.status=-1;}
     p->result.reclaimed=true;
+    if(p->result.finished && p->result.vector==6)
+        arch_debug_puts("ON.: user application fault reclaimed.\n");
 }
 task_id process_create(const char *name,const void *code,size_t length,uint64_t value) {
     uint64_t flags=arch_interrupt_save();task_id id=0;

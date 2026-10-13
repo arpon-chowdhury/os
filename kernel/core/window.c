@@ -2,7 +2,7 @@
 #include "arch.h"
 #include <limits.h>
 static bool valid(struct ui *u,int id) {
-    return u && u->graphics.ready && id>=0 && (unsigned)id<u->count;
+    return u && u->graphics.ready && id>=0 && (unsigned)id<u->count && !u->surfaces[id].retired;
 }
 static void number(unsigned value) {
     char digits[11];unsigned n=0;

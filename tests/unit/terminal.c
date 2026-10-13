@@ -59,3 +59,5 @@ int main(void) {
     terminal_handle_event(&escape);type("echo restored\n");assert(contains("restored"));
     puts("Terminal commands, editing, wrapping, scrolling, cursor, bounds, and fallback passed.");
 }
+
+void ui_demo_close(void) {}

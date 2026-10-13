@@ -117,6 +117,7 @@ void terminal_handle_event(const struct keyboard_event *event) {
     if(!active || !event || !event->pressed) return;
     if(demo_active) {
         if(event->scancode==1) {
+            if(ui_active) ui_demo_close();
             bool was_ui=ui_active;demo_active=false;ui_active=false;
             framebuffer_fill(&screen,0,0,screen.width,screen.height,0x0f172a);
             for(unsigned int y=0;y<rows;++y) for(unsigned int x=0;x<cols;++x)
