@@ -107,7 +107,7 @@ and lifecycle controls, a dock, and a read-only guest RTC clock; see
 [window-management.md](window-management.md). Preemptive kernel tasks now run
 on separate stacks; isolated user execution is described in [user-mode.md](user-mode.md),
 and static executable loading in [syscalls-and-loader.md](syscalls-and-loader.md).
-Filesystem services remain future work. The current
+Bounded ATA storage is described in [storage.md](storage.md). Filesystem services remain future work. The current
 capability audit and future visual/interaction specification are in
 [gui-design.md](gui-design.md).
 
@@ -118,7 +118,7 @@ See [preemptive kernel tasks](multitasking.md). The single-CPU foreground GUI ow
 ## ON. OS Core Alpha release order
 
 Complete and verify each phase before implementing the next. The current phase
-was syscalls and executable loading and is verified; see [implementation and verification](syscalls-and-loader.md). Existing
+was storage and disk I/O and is verified; see [implementation and verification](storage.md). Existing
 Windows 11 + macOS-inspired desktop, adaptive theme tokens and bottom dock stay
 in place. The graphical demo is not yet a usable Core Alpha release.
 
@@ -126,9 +126,10 @@ in place. The graphical demo is not yet a usable Core Alpha release.
    lifecycle, guards, rollback, responsive desktop and BIOS/UEFI regressions.
 2. User execution and memory isolation (verified): owned address spaces, supervisor-only
    kernel mappings, validated privilege transitions and isolated fault teardown.
-3. Working syscalls and application loading (verified current phase): bounded user copies, validated
+3. Working syscalls and application loading (verified): bounded user copies, validated
    executable images and resource ownership.
-4. Storage drivers and bounded disk I/O against disposable QEMU disk images.
+4. Storage drivers and bounded disk I/O (verified current phase) against disposable QEMU
+   disk images; read-only defaults, explicit flush and contained errors.
 5. Reliable filesystem: validated metadata, safe operations, failure recovery
    and integrity tests before writes become a release capability.
 6. Basic native application framework separated from kernel, drivers and services.

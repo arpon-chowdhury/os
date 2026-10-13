@@ -327,8 +327,9 @@ also verify repeated timer delivery under BIOS and UEFI; see the
 Virtual memory translation, mapping, permissions, and TLB invalidation are
 implemented; see the [virtual memory guide](virtual-memory.md). PS/2 input, kernel scheduling and isolated user execution are also implemented;
 see [multitasking](multitasking.md) and [user mode](user-mode.md). Bounded
-syscalls and static ELF loading are implemented; storage remains pending. See
-[syscalls and loader](syscalls-and-loader.md) for build commands, verification and limits.
+syscalls, static ELF loading and bounded ATA storage are implemented; filesystem
+services remain pending. See
+[syscalls and loader](syscalls-and-loader.md) and [storage](storage.md) for build commands, verification and limits.
 
 ## Exception builds and tests
 
@@ -387,3 +388,14 @@ under BIOS/UEFI. `make verify-app-load` runs desktop/window regressions with two
 loaded syscall-issuing applications. Images are isolated in `build/apps-test/`;
 normal boot has no embedded or automatically launched user application. See
 [implementation, actual results and limits](syscalls-and-loader.md).
+
+## Storage phase checks
+
+`make test-storage` runs sanitized ATA protocol and block service tests.
+`make verify-storage` builds isolated `STORAGE_TEST=1..5` images, creates
+disposable raw disks below `build/storage/`, and verifies BIOS/UEFI I/O, flush,
+reboot persistence, failure containment, slave-only selection and desktop stress.
+Installed OVMF code and variable templates are read-only inputs. The default
+QEMU q35 AHCI boot controller is unsupported; tests attach `piix3-ide` alongside
+it. Normal images never enable disk writes. See [storage](storage.md) for actual
+results and the filesystem integrity work still required.

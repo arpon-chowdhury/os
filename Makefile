@@ -93,9 +93,21 @@ ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USE
 $(error APP_TEST must run separately from other injections)
 endif
 endif
-MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)-$(APP_TEST)
+STORAGE_TEST ?= 0
+ifeq ($(filter $(STORAGE_TEST),0 1 2 3 4 5),)
+$(error STORAGE_TEST must be 0 through 5)
+endif
+ifneq ($(STORAGE_TEST),0)
+ifeq ($(filter build/%,$(BUILD)),)
+$(error STORAGE_TEST requires an isolated BUILD directory beneath build/)
+endif
+ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)-$(APP_TEST),0-0-0-0-0-0-0)
+$(error STORAGE_TEST must run separately from other injections)
+endif
+endif
+MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)-$(APP_TEST)-$(STORAGE_TEST)
 # Portable subsystems plus only the selected architecture.
-COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched kernel/exec kernel/services libs -name '*.c' -type f))
+COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched kernel/exec kernel/services kernel/drivers libs -name '*.c' -type f))
 ARCH_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.c' -type f))
 SOURCES := $(COMMON_SOURCES) $(ARCH_SOURCES)
 ifeq ($(HEAP_TEST),1)
@@ -109,7 +121,7 @@ ifeq ($(filter build/%,$(BUILD)),)
 $(error EXCEPTION_TEST requires an isolated BUILD directory beneath build/)
 endif
 endif
-CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST) -DON_USER_TEST=$(USER_TEST) -DON_APP_TEST=$(APP_TEST)
+CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST) -DON_USER_TEST=$(USER_TEST) -DON_APP_TEST=$(APP_TEST) -DON_STORAGE_TEST=$(STORAGE_TEST)
 CPPFLAGS += -DON_APP_PROBE_PATH='"$(BUILD)/apps/probe.elf"' -DON_APP_FAULT_PATH='"$(BUILD)/apps/fault.elf"' -DON_APP_RETURN_PATH='"$(BUILD)/apps/return.elf"' -DON_APP_LOAD_PATH='"$(BUILD)/apps/load.elf"'
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
@@ -283,6 +295,8 @@ check-deps:
 	done; exit $$missing
 
 help:
+	@echo 'make test-storage       Run sanitized ATA protocol and block I/O safety tests'
+	@echo 'make verify-storage     Test disposable disks, durability, errors and desktop on BIOS/UEFI'
 	@echo 'make apps               Build independent static ON. ABI ELF64 test programs'
 	@echo 'make test-elf           Run sanitized ELF validation/population/rollback tests'
 	@echo 'make verify-apps        Test ELF/syscall safety on BIOS/UEFI'
@@ -483,3 +497,14 @@ verify-app-load: check-ovmf
 	$(MAKE) iso BUILD="$(BUILD)/apps-test/load" APP_TEST=3
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/apps-test/load/on.iso" "$(BUILD)/apps-test/load/bios" --timeout "$(UEFI_TIMEOUT)" --app-test 3 --windows-test
 	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/apps-test/load/on.iso" "$(BUILD)/apps-test/load/uefi" --timeout "$(UEFI_TIMEOUT)" --app-test 3 --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"
+
+.PHONY: test-storage verify-storage
+test-storage:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/services/block.c tests/unit/block.c -o "$(BUILD)/tests/block"
+	"$(BUILD)/tests/block"
+	"$(BUILD)/tests/block" flush-failure
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/drivers/storage/ata.c tests/unit/ata.c -o "$(BUILD)/tests/ata"
+	"$(BUILD)/tests/ata"
+verify-storage: check-ovmf test-storage
+	$(PYTHON) scripts/verify-storage.py --qemu "$(QEMU)" --make "$(MAKE)" --build "$(BUILD)/storage" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)" --timeout "$(UEFI_TIMEOUT)"

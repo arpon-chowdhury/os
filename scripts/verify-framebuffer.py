@@ -17,6 +17,9 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--storage-test', type=int, choices=[1,2,3,4,5])
+    parser.add_argument('--storage-image', type=Path)
+    parser.add_argument('--storage-readonly', action='store_true')
     parser.add_argument('--app-test', type=int, choices=[1,2,3])
     parser.add_argument('--user-test', type=int, choices=[1,2,3])
     parser.add_argument('--task-test', type=int, choices=[1,2,3])
@@ -38,7 +41,7 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test, args.app_test)) > 1:
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test, args.app_test, args.storage_test)) > 1:
         parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
@@ -49,6 +52,12 @@ def main():
     for firmware in (args.ovmf_code, args.ovmf_vars):
         if firmware and not firmware.is_file():
             parser.error('Missing OVMF firmware: ' + str(firmware))
+    if args.storage_image and (not args.storage_test or not args.storage_image.is_file()):
+        parser.error('--storage-image requires a storage test and an existing regular image')
+    if args.storage_test and args.storage_test!=3 and not args.storage_image:
+        parser.error('this storage mode requires a disposable image')
+    if args.storage_test==3 and args.storage_image:
+        parser.error('absent-device mode must have no disk image')
     if args.timeout <= 0:
         parser.error('--timeout must be positive')
     output = Path(args.output).resolve()
@@ -75,6 +84,19 @@ def main():
                '-serial', 'file:' + str(serial), '-monitor', 'none',
                '-debugcon', 'file:' + str(debug), '-global', 'isa-debugcon.iobase=0xe9',
                '-qmp', 'stdio', '-no-reboot', '-no-shutdown']
+    if args.storage_image:
+        disk_path=args.storage_image.resolve()
+        if not disk_path.is_relative_to(Path('build').resolve()):
+            parser.error('storage tests only accept images below the repository build directory')
+        file_node={'driver':'file','filename':str(disk_path)}
+        if args.storage_readonly:
+            # ide-hd refuses a readonly node. blkdebug supplies EROFS on every
+            # write while allowing attachment and reads; the raw image stays unchanged.
+            file_node={'driver':'blkdebug','image':file_node,'inject-error':[
+                {'event':'write_aio','errno':30,'immediately':True,'once':False}]}
+        block_node={'driver':'raw','node-name':'ondisk','file':file_node}
+        command += ['-device','piix3-ide,id=onstorage','-blockdev',json.dumps(block_node),
+                    '-device','ide-hd,bus=onstorage.0,unit='+('1' if args.storage_test==5 else '0')+',drive=ondisk,werror=report']
     if args.ovmf_code:
         # Each test starts with clean NVRAM; never modify installed firmware.
         variables = output / 'ovmf-test-vars.fd'
@@ -139,6 +161,16 @@ def main():
                     assert fields['rax'] == 1 and fields['rcx'] == 0 and fields['rdx'] == 0, fields
                 assert 'ON.: framebuffer welcome screen ready.' in log
                 assert 'nested fatal' not in log and 'ERROR exception test returned' not in log
+            if args.storage_test:
+                log=debug.read_text()
+                marker={1:'ON.: STORAGE TEST bounded reads, writes, flush, boundaries and repeated I/O passed.',
+                        2:'ON.: STORAGE TEST persisted data after reboot passed.',
+                        3:'ON.: STORAGE TEST absent device fallback passed.',
+                        4:'ON.: STORAGE TEST backend write failure quarantine passed.',
+                        5:'ON.: STORAGE TEST slave-only selection and flushed I/O passed.'}[args.storage_test]
+                assert 'STORAGE TEST FAILED' not in log
+                assert marker in log.splitlines() and marker in serial_lines()
+                print('Verified storage test mode '+str(args.storage_test))
             if args.app_test:
                 log=debug.read_text()
                 assert 'APP TEST FAILED' not in log
@@ -678,6 +710,12 @@ def main():
                 (output / (prefix + '-registers.log')).write_text(registers)
                 status = execute('query-status')
                 assert status['status'] == 'running', status  # QEMU is live; guest CPU is halted.
+            if args.storage_test==1 and args.windows_test:
+                log=debug.read_text()
+                matches=re.findall(r'ON\.: task [0-9]+ storage-reader ready dispatches=([0-9]+)',log)
+                assert matches and any(int(n)>1 for n in matches), 'Storage reader did not run during desktop interaction'
+                assert 'STORAGE TEST FAILED' not in log
+                print('Verified desktop/input/themes/windows during background disk reads')
             if args.app_test==3:
                 log=debug.read_text()
                 for name in ['app-load-a','app-load-b']:

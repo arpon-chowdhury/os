@@ -1,4 +1,5 @@
 #include "task.h"
+#include "block.h"
 #include "arch.h"
 #include "virtual.h"
 #include "process.h"
@@ -116,6 +117,8 @@ void task_boot_start(void) {
 #endif
     process_boot_test();
     application_boot_test();
+    storage_boot_start();
+    storage_boot_test();
     if(task_create("scheduler-monitor",maintenance,0)) arch_debug_puts("ON.: independent scheduler-monitor kernel task ready.\n");
     else arch_debug_puts("ON.: task stacks unavailable; foreground services retained.\n");
 }

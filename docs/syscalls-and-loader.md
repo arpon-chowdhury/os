@@ -4,7 +4,8 @@ ON. OS now executes independent, bounded ELF64 applications in isolated Ring 3
 address spaces. This completes the syscall/loader phase, not full application
 compatibility or the Core Alpha release. Normal boot still launches no user
 applications; the existing desktop, adaptive themes, bottom dock and input remain
-kernel-owned. Storage, filesystem execution and application GUI services are pending.
+kernel-owned. The subsequent [storage phase](storage.md) adds bounded kernel disk
+I/O; filesystem execution and application GUI services are pending.
 
 ## Entry, return and ABI v1
 
@@ -186,5 +187,6 @@ GUI application APIs and package compatibility are absent. KPTI, DMA isolation
 and speculative side-channel hardening are not implemented. Kernel faults stay
 fatal; bounded user faults terminate only their process. This is a lightweight
 static ON. ABI foundation, not general Linux/Windows/macOS application support.
-Storage/disk I/O and filesystem integrity remain subsequent core phases; no
+This historical phase record predates [bounded disk I/O](storage.md). Filesystem
+integrity remains pending; no
 optional features, host macOS settings, or Phase 8 release work were changed.
