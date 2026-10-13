@@ -85,8 +85,9 @@ pointer-overlay save/restore behavior remains in the framebuffer backend.
 
 Limitations: CPU rasterization into the front buffer can tear. There is no
 per-window raster cache, alpha shadow, double buffering, vsync, GPU driver, modal
-window, snapping, animation, persistent layout, application registry or process isolation. Preemptive kernel tasks are now implemented
-separately; see [multitasking](multitasking.md). Only the built-in foreground tools are provided.
+window, snapping, animation, persistent layout, application registry or automatic user-process ownership. Preemptive kernel tasks are now implemented
+separately; see [multitasking](multitasking.md). Only the built-in foreground tools are provided. Isolated user execution is
+a separate service described in [user-mode.md](user-mode.md).
 At compact resolutions the dock may overlay the bottom of a window, and content
 is clipped when a window is too small to display it all. Physical hardware and
 full accessibility remain unverified.

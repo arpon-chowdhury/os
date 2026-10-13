@@ -75,10 +75,10 @@ static void command(void) {
     else if(equal(name,"graphics")) demo_active=graphics_demo(&screen);
     else if(equal(name,"tasks")) {
         struct task_info info[TASK_MAX];size_t n=task_list(info,TASK_MAX);
-        terminal_write("Preemptive kernel tasks (ring 0)\n");
+        terminal_write("Preemptive kernel and user tasks\n");
         static const char *states[]={"free","ready","running","sleeping","zombie","faulted"};
         for(size_t i=0;i<n;++i) {
-            number(info[i].id);put(' ');terminal_write(info[i].name);terminal_write(" [");terminal_write(states[info[i].state]);terminal_write("]\n");
+            number(info[i].id);put(' ');terminal_write(info[i].name);terminal_write(" [");terminal_write(states[info[i].state]);terminal_write(info[i].address_root?"; user]\n":"; kernel]\n");
             metric("  Dispatches: ",info[i].dispatches);
             metric("  CPU samples (~100 Hz): ",info[i].cpu_ticks);
             metric("  Idle samples: ",info[i].idle_ticks);

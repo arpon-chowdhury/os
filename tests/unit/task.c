@@ -24,6 +24,9 @@ bool arch_task_stack_allocate(unsigned slot,uintptr_t *base) {
 void arch_task_stack_release(unsigned slot) {assert(!enabled && slot!=(task_current()&255) && stacks[slot]);free(stacks[slot]);stacks[slot]=0;++releases;}
 uintptr_t arch_task_context(uintptr_t base,void (*start)(void)) {assert(start && !enabled);return base+TASK_STACK_BYTES-64;}
 void arch_task_switch(uintptr_t *old_stack,uintptr_t new_stack) {assert(!enabled && old_stack && new_stack);*old_stack=1;++switches;}
+void arch_task_activate(uint64_t root,uintptr_t top) {assert(!enabled);(void)top;arch_address_activate(root);}
+__attribute__((noreturn)) void arch_user_enter(uintptr_t entry,uintptr_t stack) {(void)entry;(void)stack;abort();}
+static const unsigned char user_code[]={0x31,0xc0,0xcd,0x80};
 static void entry(void *arg) {(void)arg;abort();}
 static struct task_info snapshot(task_id id) {struct task_info info;assert(task_snapshot(id,&info));return info;}
 int main(void) {
@@ -50,13 +53,14 @@ int main(void) {
     task_id ids[TASK_MAX-1];
     for(unsigned i=0;i<TASK_MAX-1;++i) {ids[i]=task_create("long bounded task name beyond twenty four characters",entry,0);assert(ids[i]);assert(strlen(snapshot(ids[i]).name)==23);}
     assert(!task_create("full",entry,0));assert(task_list(info,TASK_MAX)==TASK_MAX);
+    assert(!process_create("task-capacity",user_code,sizeof(user_code),0));
     assert(task_list(info,1)==1 && task_list(0,8)==0);
     for(unsigned i=0;i<TASK_MAX-1;++i) assert(task_terminate(ids[i]));
     task_reap();assert(task_list(info,TASK_MAX)==1 && allocations==releases && enabled);
     for(unsigned i=0;i<100;++i) {task_id id=task_create("reuse",entry,0);assert(id && id!=ids[0]);assert(task_terminate(id));task_reap();assert(!task_snapshot(id,info));}
     assert(allocations==releases && switches>=6 && !task_terminate(UINT32_MAX));
     enabled=false;task_yield();assert(!enabled);enabled=true;
-    assert(!process_user_execution_enabled());
+    assert(process_user_execution_enabled());
     struct process_user_layout layout={.entry=0x400000,.stack_bottom=0x800000,.stack_top=0x804000};
     assert(process_user_layout_valid(&layout));layout.entry=layout.stack_bottom;assert(!process_user_layout_valid(&layout));
     layout.entry=UINTPTR_MAX;assert(!process_user_layout_valid(&layout));assert(!process_user_layout_valid(0));
@@ -77,6 +81,19 @@ int main(void) {
     for(unsigned i=0;i<TASK_QUANTUM_TICKS;++i) task_preempt();
     assert(releases==released_before);arch_interrupt_restore(irq_flags);
     task_reap();assert(releases==released_before+1 && enabled);
+    extern unsigned model_live;
+    fail_allocate=true;
+    assert(!process_create("stack-fail",user_code,sizeof(user_code),0) && !model_live);
+    task_id user=process_create("user",user_code,sizeof(user_code),42);assert(user);
+    assert(snapshot(user).address_root);
+    struct vmm_translation tr;assert(process_translate(user,PROCESS_DATA,&tr));
+    assert(*(uint64_t *)pmm_page_pointer(tr.physical)==42);
+    assert(task_terminate(user));task_reap();
+    struct process_result result;assert(process_result(user,&result) && result.finished && result.reclaimed && result.status==-1 && !model_live);
+    assert(!process_translate(user,PROCESS_DATA,&tr));
+    task_id reused_user=process_create("user-reuse",user_code,sizeof(user_code),43);assert(reused_user && reused_user!=user);
+    assert(!process_result(user,&result));assert(task_terminate(reused_user));task_reap();assert(!model_live);
+    assert(!process_create("bad",0,4,0) && !process_create("big",user_code,4097,0));
     task_fault_report();assert(snapshot(boot).state==TASK_FAULTED);task_diagnostics();
-    puts("Task policy, states, round-robin, sleep deadlines, termination/reap, generations, capacity, allocation failure, IF preservation, accounting and disabled process/syscall contracts passed.");
+    puts("Task policy, states, round-robin, sleep deadlines, termination/reap, generations, capacity, allocation failure, IF preservation, accounting, process cancellation/rollback and disabled general syscall contracts passed.");
 }

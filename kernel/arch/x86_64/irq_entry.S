@@ -11,6 +11,13 @@ x86_irq_\number:
 .irp number,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
     IRQ \number
 .endr
+.global x86_user_exit_interrupt
+.type x86_user_exit_interrupt,@function
+x86_user_exit_interrupt:
+    pushq $0
+    pushq $128
+    jmp x86_irq_common
+.size x86_user_exit_interrupt,.-x86_user_exit_interrupt
 .type x86_irq_common, @function
 x86_irq_common:
     cld

@@ -31,6 +31,7 @@ static void invalidate(uintptr_t address) {
 static bool valid(uintptr_t address, unsigned permissions) {
     return ready && canonical(address) && !(address & 4095) &&
         !(permissions & ~(VMM_WRITE | VMM_USER | VMM_EXEC)) &&
+        (!(permissions & VMM_USER) || address < UINT64_C(0x0000800000000000)) &&
         (nx_enabled || (permissions & VMM_EXEC));
 }
 static uint64_t bits(unsigned permissions) {
@@ -51,7 +52,7 @@ bool vmm_init(const struct boot_memory_map *map) {
         end = map->ranges[i].base + map->ranges[i].length;
     }
     __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
-    if (cr4 & (UINT64_C(1) << 12)) goto done; /* LA57 is unsupported. */
+    if (cr4 & ((UINT64_C(1) << 12) | (UINT64_C(1) << 17))) goto done; /* LA57 is unsupported. */
     uint32_t a, b, c, d;
     __asm__ volatile ("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0x80000000), "c"(0));
     unsigned width = 36;
@@ -74,6 +75,8 @@ bool vmm_init(const struct boot_memory_map *map) {
     __asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
     cr0 |= UINT64_C(1) << 16; /* Enforce read-only leaves in supervisor mode. */
     __asm__ volatile ("mov %0, %%cr0" : : "r"(cr0) : "memory");
+    cr4 &= ~(UINT64_C(1) << 7); /* No inherited global TLB entries in process roots. */
+    __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4) : "memory");
     ready = true;
     ok = true;
 done:
@@ -183,3 +186,21 @@ done:
 }
 bool vmm_protect(uintptr_t address, unsigned permissions) { return change(address, permissions, 0, false); }
 bool vmm_unmap(uintptr_t address, uint64_t *physical) { return change(address, 0, physical, true); }
+
+/* Process roots own no boot lower-half mappings. Shared kernel tables are
+   copied only as supervisor PML4 entries on every switch, including new stacks. */
+uint64_t arch_address_kernel_root(void) {return ready && nx_enabled ? root : 0;}
+uint64_t arch_address_current_root(void) {
+    uint64_t value;__asm__ volatile ("mov %%cr3,%0" : "=r"(value));return value&ADDRESS;
+}
+void arch_address_activate(uint64_t process_root) {
+    uint64_t selected=process_root?process_root:root;
+    if(!ready) {if(process_root) arch_halt();return;}
+    if(process_root) {
+        uint64_t *p=pmm_page_pointer(process_root),*kernel=table(root);
+        if(!p || !kernel) arch_halt();
+        for(unsigned i=256;i<512;++i) p[i]=kernel[i]&~USER;
+    }
+    /* PCID and global pages are disabled: every switch flushes stale mappings. */
+    __asm__ volatile ("mov %0,%%cr3" : : "r"(selected) : "memory");
+}

@@ -5,6 +5,7 @@
 #include "exceptions.h"
 #include "interrupts.h"
 #include "task.h"
+#include "process.h"
 
 struct table_pointer { uint16_t limit; uint64_t base; } __attribute__((packed));
 struct idt_gate {
@@ -25,7 +26,8 @@ _Static_assert(offsetof(struct exception_frame, vector) == 120, "assembly frame 
 _Static_assert(offsetof(struct exception_frame, rip) == 136, "CPU frame ABI");
 _Static_assert(sizeof(struct exception_frame) == 176, "IST frame ABI");
 
-static uint64_t gdt[5] = {0, 0x00af9a000000ffff, 0x00cf92000000ffff, 0, 0};
+static uint64_t gdt[7] = {0, 0x00af9a000000ffff, 0x00cf92000000ffff, 0, 0,
+                          0x00affa000000ffff, 0x00cff2000000ffff};
 static struct task_state tss;
 static struct idt_gate idt[256] __attribute__((aligned(16)));
 /* Separate mapped stacks for double fault, NMI, machine check, and other faults. */
@@ -45,11 +47,23 @@ void x86_idt_set_gate(unsigned int vector, uintptr_t handler, uint8_t ist) {
 
 void arch_cpu_init(void) {
     __asm__ volatile ("cli" : : : "memory");
-    /* No user selectors or DPL3 gates exist; explicitly disable SYSCALL too. */
+    /* SYSCALL remains disabled. Only the experimental exit interrupt is DPL3. */
     uint32_t efer_low,efer_high;
     __asm__ volatile ("rdmsr" : "=a"(efer_low), "=d"(efer_high) : "c"(0xc0000080));
     efer_low &= ~1u;
     __asm__ volatile ("wrmsr" : : "a"(efer_low), "d"(efer_high), "c"(0xc0000080) : "memory");
+    /* No FPU/SIMD or user-controlled FS/GS bases are part of this context ABI. */
+    uint64_t cr0,cr4;
+    __asm__ volatile ("mov %%cr0,%0" : "=r"(cr0));cr0|=8;
+    __asm__ volatile ("mov %0,%%cr0" : : "r"(cr0) : "memory");
+    __asm__ volatile ("mov %%cr4,%0" : "=r"(cr4));cr4&=~((1ull<<16)|(1ull<<22)|(1ull<<24));
+    __asm__ volatile ("mov %0,%%cr4" : : "r"(cr4) : "memory");
+    for(unsigned msr=0xc0000100u;msr<=0xc0000102u;++msr)
+        __asm__ volatile ("wrmsr" : : "c"(msr),"a"(0),"d"(0) : "memory");
+    uint32_t cpuid_a,cpuid_b,cpuid_c,cpuid_d;
+    __asm__ volatile ("cpuid" : "=a"(cpuid_a),"=b"(cpuid_b),"=c"(cpuid_c),"=d"(cpuid_d) : "a"(1),"c"(0));
+    if(cpuid_d&(1u<<11)) for(unsigned msr=0x174;msr<=0x176;++msr)
+        __asm__ volatile ("wrmsr" : : "c"(msr),"a"(0),"d"(0) : "memory");
     for (unsigned int i = 0; i < 4; ++i) tss.ist[i] = (uintptr_t)&x86_exception_stacks[i][sizeof(x86_exception_stacks[i])];
     tss.rsp[0] = tss.ist[3];
     tss.iomap = sizeof(tss); /* No I/O permission bitmap. */
@@ -62,6 +76,9 @@ void arch_cpu_init(void) {
         x86_idt_set_gate(vector, x86_exception_stubs[vector],
                          vector == 8 ? 1 : vector == 2 ? 2 : vector == 18 ? 3 : 4);
     }
+    extern void x86_user_exit_interrupt(void);
+    x86_idt_set_gate(128,(uintptr_t)x86_user_exit_interrupt,0);
+    idt[128].attributes=0xee;
     const struct table_pointer gdtr = {sizeof(gdt) - 1, (uintptr_t)gdt};
     const struct table_pointer idtr = {sizeof(idt) - 1, (uintptr_t)idt};
     x86_load_gdt(&gdtr);
@@ -81,6 +98,8 @@ static void hex(const char *label, uint64_t value) {
 
 __attribute__((noreturn)) void x86_exception_fatal(const struct exception_frame *frame, uint64_t cr2) {
     __asm__ volatile ("cli" : : : "memory");
+    if((frame->cs&3)==3 && frame->vector!=2 && frame->vector!=8 && frame->vector!=18 && !(frame->vector==14 && (frame->error&8)) && task_current_user())
+        process_user_stop(-2,frame,cr2);
     if (fatal_active) {
         arch_debug_puts("ON.: nested fatal exception; halting.\n");
         arch_halt();
@@ -129,14 +148,14 @@ void arch_exception_test(void) {
 #elif ON_EXCEPTION_TEST == 2
     __asm__ volatile ("xor %%edx, %%edx; mov $1, %%eax; xor %%ecx, %%ecx; .global x86_test_fault; x86_test_fault: div %%ecx" : : : "rax", "rcx", "rdx", "cc");
 #elif ON_EXCEPTION_TEST == 3
-    __asm__ volatile ("movw $0x28, %%ax; .global x86_test_fault; x86_test_fault: movw %%ax, %%ds" : : : "rax");
+    __asm__ volatile ("movw $0x38, %%ax; .global x86_test_fault; x86_test_fault: movw %%ax, %%ds" : : : "rax");
 #elif ON_EXCEPTION_TEST == 4
     /* Request no low mappings, then perform a real supervisor write fault. */
     __asm__ volatile ("movabs $0x1000, %%rax; .global x86_test_fault; x86_test_fault: movb $1, (%%rax)" : : : "rax", "memory");
 #elif ON_EXCEPTION_TEST == 5
     /* A #GP whose gate is absent becomes #DF during exception delivery. */
     idt[13].attributes = 0x0e;
-    __asm__ volatile ("movw $0x28, %%ax; .global x86_test_fault; x86_test_fault: movw %%ax, %%ds" : : : "rax", "memory");
+    __asm__ volatile ("movw $0x38, %%ax; .global x86_test_fault; x86_test_fault: movw %%ax, %%ds" : : : "rax", "memory");
 #elif ON_EXCEPTION_TEST == 6
     extern void x86_test_bad_stack(void) __attribute__((noreturn));
     x86_test_bad_stack();
@@ -165,3 +184,6 @@ void arch_exception_test(void) {
     arch_halt();
 #endif
 }
+
+void arch_user_kernel_stack(uintptr_t top) {tss.rsp[0]=top?top:tss.ist[3];}
+uintptr_t x86_user_exception_stack(void) {return tss.rsp[0];}

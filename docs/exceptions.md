@@ -1,19 +1,20 @@
 # x86-64 CPU exceptions
 
 ON. installs its own GDT, TSS, and IDT on the bootstrap CPU before framebuffer
-initialization. All CPU exception vectors 0–31 have fatal handlers. Maskable
+initialization. All CPU exception vectors 0–31 have handlers; kernel faults remain fatal and
+synchronous user faults terminate the affected task. Maskable
 interrupts stay disabled during setup and controlled fault tests. Normal boot
 then installs PIC IRQ gates at vectors 32–47 and enables PIT delivery; see the
-[interrupt guide](interrupts.md). Vectors 48–255 remain non-present. Multitasking,
-user mode, and fault recovery remain future work.
+[interrupt guide](interrupts.md). Vector 128 is the user exit-only gate; other vectors 48–255 remain non-present.
+See [user execution](user-mode.md) for process-specific fault recovery.
 
 ## Descriptor tables and entry
 
 The GDT contains a null descriptor, ring-0 64-bit code (selector `0x08`), ring-0
-data (`0x10`), and a 64-bit TSS (`0x18`, occupying two slots). The assembly loader
+data (`0x10`), a 64-bit TSS (`0x18`, occupying two slots), and user code/data
+(`0x2b`/`0x33` including RPL3). The assembly loader
 reloads CS with a far return, reloads the data segments, and loads TR. The TSS
-has no I/O bitmap. Its RSP0 exists only as a placeholder; there is no privilege
-transition or task switching in the current kernel.
+has no I/O bitmap. RSP0 selects each task's guarded kernel entry stack; bootstrap uses the exception-stack fallback.
 
 Every exception gate is a ring-0 interrupt gate. Four aligned, 16 KiB static
 stacks provide IST1 for double fault, IST2 for NMI, IST3 for machine check, and
@@ -75,7 +76,7 @@ make 3.81. Reusing a directory across modes was checked by switching
 | --- | --- | --- |
 | 1 / `ud` | `ud2` | 6 / 0 |
 | 2 / `de` | Integer division by zero in assembly | 0 / 0 |
-| 3 / `gp` | Load DS with out-of-range selector `0x28` | 13 / `0x28` |
+| 3 / `gp` | Load DS with out-of-range selector `0x38` | 13 / `0x38` |
 | 4 / `pf` | Supervisor write to unmapped virtual address `0x1000` | 14 / 2; CR2 = `0x1000` |
 | 5 / `df` | Make the #GP gate non-present, then trigger #GP | 8 / 0 on the separate double-fault stack |
 | 6 / `stack` | Set RSP to zero, then execute `ud2` | 6 / 0; saved RSP = 0 |
@@ -113,3 +114,11 @@ the prior image could remain linked if the mode changed within one second.
 The build now forces a link whenever the stored mode differs; the repeated
 mode-switch check passed. No kernel boot or fault-handler error was observed
 in the final QEMU checks. Physical hardware remains unverified.
+
+## User-fault containment
+
+Synchronous CPL3 faults now copy the IST frame to the task's private kernel stack
+and terminate that user task, deferring reclamation until after a switch. Kernel
+faults, NMI, double fault, machine check and reserved-bit paging errors remain
+fatal. See [user-mode.md](user-mode.md) for contracts and fault tests. The controlled
+#GP/#DF selector is now 0x38 (outside the expanded GDT); 0x28 is a user descriptor.

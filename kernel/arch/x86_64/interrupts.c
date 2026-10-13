@@ -6,6 +6,7 @@
 #include "terminal.h"
 #include "mouse.h"
 #include "task.h"
+#include "process.h"
 
 #define PIC_MASTER 0x20
 #define PIC_SLAVE 0xa0
@@ -35,6 +36,10 @@ bool x86_irq_register(unsigned int irq, x86_irq_handler handler) {
 }
 
 void x86_irq_dispatch(const struct exception_frame *frame) {
+    if(frame->vector==128) {
+        if((frame->cs&3)!=3 || !task_current_user()) arch_halt();
+        process_user_stop((int64_t)frame->rax,frame,0);
+    }
     if (frame->vector < X86_IRQ_BASE || frame->vector >= X86_IRQ_BASE + X86_IRQ_COUNT) return;
     unsigned int irq = frame->vector - X86_IRQ_BASE;
     /* Spurious IRQ7 gets no EOI; spurious IRQ15 acknowledges only the cascade. */

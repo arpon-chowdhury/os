@@ -42,7 +42,7 @@ shell input; `ui.c` retains surfaces, controls, damage, focus and compositing;
 Original ON. bitmap typography and semantic theme tokens are shared throughout.
 
 Limitations: no bitmap wallpaper decoder/filesystem, persistent preferences,
-real application system, process isolation, translucency, animation,
+real application system, isolated desktop tools, translucency, animation,
 double buffering, vsync, GPU acceleration, Unicode or scalable font rendering.
 Small displays use compact layouts. Full accessibility remains future work. Only QEMU x86-64 is tested, not physical PCs.
 

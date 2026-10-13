@@ -77,3 +77,8 @@ and UEFI reached both tick thresholds, the no-VGA fallback passed, and all 12
 fatal fault checks passed. The UEFI welcome image and all 12 exception captures
 matched the normal BIOS welcome PNG byte for byte. The linked normal kernel
 had no undefined symbols.
+
+IRQ0 also preempts CPL3 tasks using their private TSS.RSP0 entry stacks. CR3 and
+RSP0 are selected before switching stacks. Vector 128 is a separate DPL3,
+exit-only trap, not a device IRQ, and receives no PIC acknowledgement. All device
+IRQ and exception entry contracts are described in [user-mode.md](user-mode.md).

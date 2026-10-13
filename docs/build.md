@@ -325,8 +325,9 @@ the x86-64 BIOS handoff and welcome rendering. The subsequent PIC/PIT checks
 also verify repeated timer delivery under BIOS and UEFI; see the
 [interrupt guide](interrupts.md). Physical frame allocation is also implemented; see the [memory guide](memory.md).
 Virtual memory translation, mapping, permissions, and TLB invalidation are
-implemented; see the [virtual memory guide](virtual-memory.md). Other drivers,
-scheduling, and user space remain unimplemented.
+implemented; see the [virtual memory guide](virtual-memory.md). PS/2 input, kernel scheduling and isolated user execution are also implemented;
+see [multitasking](multitasking.md) and [user mode](user-mode.md). General
+syscalls, executable loading and storage remain unimplemented.
 
 ## Exception builds and tests
 
@@ -366,3 +367,12 @@ Normal builds use `HEAP_TEST=0`; injected modes require isolated build directori
 ## Kernel task checks
 
 `make test-tasks` uses native sanitizers and a modeled context-switch hook. `make verify-tasks` builds isolated `TASK_TEST=1`, `2`, `3` images and checks BIOS/UEFI real contexts, expected guard faults, and allocation rollback. Task mode is part of object/build-mode keys and must not be combined with other fault injections. See [multitasking](multitasking.md).
+
+## Ring 3 phase checks
+
+`make test-address-spaces` validates portable ownership/rollback code under native
+sanitizers. `make verify-user` builds isolated USER_TEST=1/2 images and verifies
+CPL3/CR3, permissions, user fault containment and real allocation rollback under
+BIOS/UEFI. `make verify-user-load` uses USER_TEST=3 for GUI regressions under two
+sustained user workers. These fixtures load trusted embedded bytes only; normal
+boot starts no applications. See [contracts and results](user-mode.md).

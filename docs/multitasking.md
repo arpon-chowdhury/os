@@ -2,8 +2,9 @@
 
 This stage adds actual independent kernel execution contexts. GUI windows remain
 retained surfaces owned by the foreground task; creating a window does not create
-a task or process. Every kernel task runs at CPL0 in the shared boot CR3. User-mode execution,
-process loading and private address spaces remain future work.
+a task or process. Kernel tasks run at CPL0 in the shared boot CR3. Isolated
+user tasks now run at CPL3 with owned roots and kernel entry stacks; see
+[Ring 3 and address spaces](user-mode.md). Executable loading remains future work.
 
 ## Running behavior
 
@@ -38,7 +39,8 @@ Total dispatches include tasks that have since been reaped.
 bootstrap task. `kernel/sched/task.c` owns lifecycle and scheduling policy;
 `kernel/arch/x86_64/task.c` owns guarded stack mappings; `task_switch.S` owns the
 callee-saved machine context. `kernel/sched/boot.c` constructs the diagnostic
-task and controlled test tasks. Window/process management remains separate.
+task and controlled test tasks. Window management remains separate; the process service attaches private roots
+and deferred cleanup to scheduler tasks.
 
 | API / state | Contract |
 | --- | --- |
@@ -84,43 +86,27 @@ Capacity exhaustion fails cleanly. Missing PMM/VMM or unavailable NX stack
 mappings leave the foreground-only path working. The kernel heap is unchanged.
 
 Guard pages catch accidental stack boundary access; NX prevents execution through
-the stack mapping, and supervisor permissions prepare a future CPL3 boundary.
+the stack mapping, and supervisor permissions enforce the CPL3 boundary.
 These protections are not isolation between trusted ring-0 tasks. All tasks can
 access shared kernel mappings, including HHDM aliases, and can corrupt the kernel
 if buggy. Bootstrap and existing exception stacks retain their prior mappings.
 A kernel fault reports the task and uses existing IST exception handling before
 halting; there is no unsafe attempt to recover and continue other kernel tasks.
 
-## Disabled user-process and syscall preparation
+## User-process integration
 
-`process.h` defines a future entry/stack layout and a bounded lower-half address
-shape validator. Shape validation is not mapping validation or an authorization
-check. `process_user_execution_enabled()` always returns false. No process or
-user address space is created. GDT descriptors and IDT gates remain DPL0, and
-CPU initialization explicitly clears EFER.SCE to disable SYSCALL instruction
-entry. Existing TSS/IST stacks remain exception infrastructure, not a user-entry
-stack-switch implementation.
-
-`syscall.h` reserves ABI version 1: RAX number/result; RDI, RSI, RDX, R10, R8,
-R9 arguments; RCX/R11 clobbered; negative errors. Proposed numbers are ABI query
-(0), yield (1), exit (2), and bounded write (3). They are reserved definitions,
-not working hardware syscalls. The preparation hook `syscall_unavailable`
-returns `-ENOSYS` for every request and never dereferences user pointers.
-
-Before enabling CPL3: implement owned process page tables with supervisor-only
-kernel mappings and validated user ranges; audit/remove exposed boot aliases;
-verify code read/execute and stack write/NX permissions; install user descriptors,
-per-task kernel entry stacks, validated IRET/SYSRET frames, and bounded syscall
-entry/copy-in/copy-out; add process-specific faults/teardown and context ownership;
-verify privilege transitions and isolation under controlled fault tests. Current
-VMM adopts one CR3 and cannot yet construct these independent process roots.
+See [Ring 3 and address spaces](user-mode.md) for the enabled privilege boundary,
+private roots, per-task TSS.RSP0, IRET entry, user fault termination and deferred
+cleanup. Kernel tasks still share trusted ring-0 mappings. General syscall entry
+and executable loading remain unimplemented; the experimental exit-only gate
+is separate from the reserved future syscall ABI.
 
 ## Verification commands
 
 `make test-tasks` runs native ASan/UBSan policy/ownership tests with a modeled
 architecture switch and allocator: states, round-robin decisions, sleep deadlines,
 termination/reap, stale IDs, capacity, allocation failure, IF restoration,
-accounting and disabled process/syscall contracts. This native model does not
+accounting, process cleanup and disabled general syscall contracts. This native model does not
 execute or verify the x86 assembly switch.
 
 `make verify-tasks` builds isolated images for three modes under both BIOS and
@@ -133,8 +119,9 @@ also exercised on the actual kernel. Mode 1 additionally runs two non-yielding
 workers while the bootstrap task busy-waits. An assembly worker sets and checks
 all fifteen general-purpose registers across timer suspension while waiting for
 its peer. Native tests check quantum boundaries, timer wakeup and deferred reap.
-The privilege test inspects CPL0, DPL0 GDT/
-IDT and disabled SYSCALL entry without entering user mode.
+The privilege test inspects CPL0, kernel and user GDT descriptors, IDT privilege levels, disabled SYSCALL/SYSENTER
+and unsupported context controls. User execution is exercised separately by
+`make verify-user`.
 
 The normal GUI regression checks also query `tasks` after desktop interactions
 to confirm that the independent monitor ran while the foreground GUI remained
@@ -142,7 +129,7 @@ responsive. Existing boot, exceptions, physical/virtual memory, heap, terminal,
 keyboard, mouse, graphics, desktop and window tests remain separate checks.
 No host settings, installations, physical disks or privileged host operations
 are needed. QEMU TCG x86-64 is the verified platform. Real hardware and SMP remain
-unverified; user processes remain unimplemented.
+unverified; general application loading remains unimplemented.
 
 ## Historical cooperative-stage results — 2026-10-13
 
@@ -190,7 +177,7 @@ PIC before switching; reclamation remains in explicit foreground scheduling and
 reap paths. Shared allocator/VMM mutations retain interrupt-disabled protection.
 Only the foreground task owns GUI/input/render state; kernel callers must protect
 shared mutable state and must not sleep/yield while holding locks. This remains a
-trusted ring-0 system, with no isolation between tasks and no FPU/SIMD context.
+trusted ring-0 system, with no isolation between trusted kernel tasks and no FPU/SIMD context.
 Interrupt-disabled code can still delay input and scheduling.
 
 `make verify-tasks` exited 0 for all six BIOS/UEFI task cases. Non-yielding workers,
@@ -206,7 +193,7 @@ terminal/About labels use “Preemptive”; their final BIOS/UEFI GUI checks are
 in `build/preemption-final-gui.log`. Generated artifacts remain ignored.
 
 This completes the single-CPU QEMU scheduling phase only. Core Alpha is not yet
-release-ready. The next phase is owned user address spaces and privilege isolation;
+release-ready. The subsequent user-isolation phase is now documented in [user-mode.md](user-mode.md);
 working syscalls/loaders, disk I/O, filesystem integrity, native applications and
 release stability work remain pending. No optional features or host macOS changes
 were made. Real hardware, SMP and latency guarantees remain unverified.

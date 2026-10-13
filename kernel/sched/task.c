@@ -6,6 +6,7 @@ struct task {
     uintptr_t context;
     task_entry entry;
     void *argument;
+    void (*cleanup)(void *);
 };
 static struct task tasks[TASK_MAX];
 static unsigned current;
@@ -49,6 +50,16 @@ task_id task_create(const char *name,task_entry entry,void *argument) {
 done:
     arch_interrupt_restore(flags);return result;
 }
+task_id task_create_isolated(const char *name,task_entry entry,void *argument,
+                             uint64_t root,void (*cleanup)(void *)) {
+    uint64_t flags=arch_interrupt_save();task_id id=0;
+    if(root && cleanup) {
+        id=task_create(name,entry,argument);
+        if(id) {struct task *t=lookup(id);t->info.address_root=root;t->cleanup=cleanup;}
+    }
+    arch_interrupt_restore(flags);return id;
+}
+bool task_current_user(void) {return initialized && tasks[current].info.address_root!=0;}
 task_id task_current(void) {return initialized?tasks[current].info.id:0;}
 bool task_snapshot(task_id id,struct task_info *info) {
     uint64_t flags=arch_interrupt_save();struct task *t=lookup(id);
@@ -63,9 +74,10 @@ size_t task_list(struct task_info *info,size_t capacity) {
 }
 static void reap_locked(void) {
     for(unsigned i=1;i<TASK_MAX;++i) if(i!=current && tasks[i].info.state==TASK_ZOMBIE) {
+        if(tasks[i].cleanup) tasks[i].cleanup(tasks[i].argument);
         arch_task_stack_release(i);
         tasks[i].info.state=TASK_FREE;tasks[i].info.id=0;
-        tasks[i].info.stack_base=0;tasks[i].context=0;tasks[i].entry=0;tasks[i].argument=0;
+        tasks[i].info.stack_base=0;tasks[i].context=0;tasks[i].entry=0;tasks[i].argument=0;tasks[i].cleanup=0;tasks[i].info.address_root=0;
     }
 }
 void task_reap(void) {uint64_t flags=arch_interrupt_save();if(initialized) reap_locked();arch_interrupt_restore(flags);}
@@ -87,6 +99,8 @@ static void schedule(bool reclaim) {
     if(next==current) {if(tasks[current].info.state==TASK_READY) tasks[current].info.state=TASK_RUNNING;return;}
     unsigned previous=current;current=next;idle=false;quantum=0;
     tasks[next].info.state=TASK_RUNNING;++tasks[next].info.dispatches;++dispatched;
+    arch_task_activate(tasks[next].info.address_root,
+                       tasks[next].info.stack_base ? tasks[next].info.stack_base+TASK_STACK_BYTES : 0);
     arch_task_switch(&tasks[previous].context,tasks[next].context);
 }
 void task_yield(void) {
@@ -104,7 +118,7 @@ bool task_sleep(uint64_t ticks) {
 __attribute__((noreturn)) void task_exit(void) {
     (void)arch_interrupt_save();
     if(!initialized || current==0) arch_halt();
-    tasks[current].info.state=TASK_ZOMBIE;schedule(true);
+    tasks[current].info.state=TASK_ZOMBIE;schedule(false);
     arch_debug_puts("ON.: ERROR terminated task resumed.\n");arch_halt();
 }
 void task_tick(void) {
@@ -136,7 +150,7 @@ void task_fault_report(void) {
 void task_diagnostics(void) {
     struct task_info info[TASK_MAX];size_t n=task_list(info,TASK_MAX);
     static const char *states[]={"free","ready","running","sleeping","zombie","faulted"};
-    arch_debug_puts("ON.: preemptive task diagnostics; user mode disabled.\n");
+    arch_debug_puts("ON.: preemptive task diagnostics; isolated user execution available.\n");
     for(size_t i=0;i<n;++i) {
         arch_debug_puts("ON.: task ");number(info[i].id);arch_debug_puts(" ");arch_debug_puts(info[i].name);arch_debug_puts(" ");arch_debug_puts(states[info[i].state]);
         arch_debug_puts(" dispatches=");number(info[i].dispatches);arch_debug_puts(" cpu_ticks=");number(info[i].cpu_ticks);arch_debug_puts(" idle_ticks=");number(info[i].idle_ticks);arch_debug_puts("\n");

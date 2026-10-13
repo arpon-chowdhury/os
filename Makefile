@@ -69,7 +69,19 @@ ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST),0-0-0-0)
 $(error TASK_TEST must run separately from other injections)
 endif
 endif
-MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)
+USER_TEST ?= 0
+ifeq ($(filter $(USER_TEST),0 1 2 3),)
+$(error USER_TEST must be 0 through 3)
+endif
+ifneq ($(USER_TEST),0)
+ifeq ($(filter build/%,$(BUILD)),)
+$(error USER_TEST requires an isolated BUILD directory beneath build/)
+endif
+ifneq ($(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST),0-0-0-0-0)
+$(error USER_TEST must run separately from other injections)
+endif
+endif
+MODE := $(EXCEPTION_TEST)-$(PMM_TEST)-$(VMM_TEST)-$(HEAP_TEST)-$(TASK_TEST)-$(USER_TEST)
 # Portable subsystems plus only the selected architecture.
 COMMON_SOURCES := $(sort $(shell find kernel/core kernel/mm kernel/sched -name '*.c' -type f))
 ARCH_SOURCES := $(sort $(shell find kernel/arch/$(ARCH) -name '*.c' -type f))
@@ -85,7 +97,7 @@ ifeq ($(filter build/%,$(BUILD)),)
 $(error EXCEPTION_TEST requires an isolated BUILD directory beneath build/)
 endif
 endif
-CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST)
+CPPFLAGS := -Iboot/protocol -Ikernel/include -Iinclude -DON_EXCEPTION_TEST=$(EXCEPTION_TEST) -DON_PMM_TEST=$(PMM_TEST) -DON_VMM_TEST=$(VMM_TEST) -DON_HEAP_TEST=$(HEAP_TEST) -DON_TASK_TEST=$(TASK_TEST) -DON_USER_TEST=$(USER_TEST)
 CFLAGS := --target=x86_64-unknown-none-elf -std=c11 -O2 -g \
 	-ffreestanding -fno-stack-protector -fno-pic -fno-pie \
 	-mno-red-zone -mcmodel=kernel -mgeneral-regs-only \
@@ -274,6 +286,9 @@ help:
 	@echo 'make verify-memory      Test PMM exhaustion and fallback under BIOS/UEFI'
 	@echo 'make test-heap          Run sanitized native heap safety and stress tests'
 	@echo 'make verify-heap        Test heap stress and rollback under BIOS/UEFI'
+	@echo 'make verify-user       Verify Ring 3, private CR3, user faults and rollback on BIOS/UEFI'
+	@echo 'make verify-user-load  Exercise desktop under two sustained Ring 3 workers on BIOS/UEFI'
+	@echo 'make test-address-spaces  Sanitized owned paging and rollback checks'
 	@echo 'make test-tasks         Run sanitized scheduler policy/ownership checks'
 	@echo 'make verify-tasks       Test real contexts, guards and rollback on BIOS/UEFI'
 	@echo 'make test-windows       Run sanitized window lifecycle and geometry checks'
@@ -383,7 +398,7 @@ verify-windows: check-ovmf $(ISO) test-windows
 .PHONY: test-tasks verify-tasks
 test-tasks:
 	@mkdir -p "$(BUILD)/tests"
-	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/sched/task.c kernel/sched/process.c tests/unit/task.c -o "$(BUILD)/tests/task"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/sched/task.c kernel/sched/process.c kernel/mm/address_space.c tests/address_model.c tests/unit/task.c -o "$(BUILD)/tests/task"
 	"$(BUILD)/tests/task"
 
 verify-tasks: check-ovmf test-tasks
@@ -393,3 +408,23 @@ verify-tasks: check-ovmf test-tasks
 		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/bios" --timeout "$(UEFI_TIMEOUT)" --task-test "$$mode" --elf "$$output/kernel.elf" --nm "$(LLVM_NM)"; \
 		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/uefi" --timeout "$(UEFI_TIMEOUT)" --task-test "$$mode" --elf "$$output/kernel.elf" --nm "$(LLVM_NM)" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"; \
 	done
+
+.PHONY: test-address-spaces verify-user
+test-address-spaces:
+	@mkdir -p "$(BUILD)/tests"
+	$(HOST_CC) -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ikernel/include kernel/mm/address_space.c tests/address_model.c tests/unit/address_space.c -o "$(BUILD)/tests/address-space"
+	"$(BUILD)/tests/address-space"
+
+verify-user: check-ovmf test-address-spaces test-tasks
+	@set -eu; for mode in 1 2; do \
+		output="$(BUILD)/user/mode-$$mode"; mkdir -p "$$output"; \
+		$(MAKE) iso BUILD="$$output" USER_TEST="$$mode" > "$$output/build.log" 2>&1 || { cat "$$output/build.log"; exit 1; }; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/bios" --timeout "$(UEFI_TIMEOUT)" --user-test "$$mode"; \
+		$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$$output/on.iso" "$$output/uefi" --timeout "$(UEFI_TIMEOUT)" --user-test "$$mode" --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"; \
+	done
+
+.PHONY: verify-user-load
+verify-user-load: check-ovmf
+	$(MAKE) iso BUILD="$(BUILD)/user/load" USER_TEST=3
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/user/load/on.iso" "$(BUILD)/user/load/bios" --timeout "$(UEFI_TIMEOUT)" --user-test 3 --windows-test
+	$(PYTHON) scripts/verify-framebuffer.py "$(QEMU)" "$(BUILD)/user/load/on.iso" "$(BUILD)/user/load/uefi" --timeout "$(UEFI_TIMEOUT)" --user-test 3 --windows-test --ovmf-code "$(OVMF_CODE)" --ovmf-vars "$(OVMF_VARS)"

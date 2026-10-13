@@ -17,6 +17,7 @@ def main():
     parser.add_argument('iso')
     parser.add_argument('output')
     parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--user-test', type=int, choices=[1,2,3])
     parser.add_argument('--task-test', type=int, choices=[1,2,3])
     parser.add_argument('--windows-test', action='store_true')
     parser.add_argument('--desktop-test', action='store_true')
@@ -36,7 +37,7 @@ def main():
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--nm', default='llvm-nm')
     args = parser.parse_args()
-    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test)) > 1:
+    if sum(bool(mode) for mode in (args.exception, args.memory_test, args.virtual_test, args.heap_test, args.task_test, args.user_test)) > 1:
         parser.error('injected test modes must be run separately')
     if args.exception and (not args.elf or args.no_framebuffer):
         parser.error('--exception requires --elf and a framebuffer')
@@ -114,7 +115,7 @@ def main():
                 raise RuntimeError('Unexpected fatal exception during normal boot')
             if args.exception:
                 log = debug.read_text()
-                vector, error = {'ud': (6, 0), 'de': (0, 0), 'gp': (13, 0x28),
+                vector, error = {'ud': (6, 0), 'de': (0, 0), 'gp': (13, 0x38),
                                  'pf': (14, 2), 'df': (8, 0), 'stack': (6, 0), 'ro': (14, 3), 'nx': (14, 17), 'unmapped': (14, 2)}[args.exception]
                 fields = dict((key, int(value, 16)) for key, value in
                               re.findall(r'^([a-z0-9_]+)=(0x[0-9a-f]+)$', log, re.MULTILINE))
@@ -137,6 +138,18 @@ def main():
                     assert fields['rax'] == 1 and fields['rcx'] == 0 and fields['rdx'] == 0, fields
                 assert 'ON.: framebuffer welcome screen ready.' in log
                 assert 'nested fatal' not in log and 'ERROR exception test returned' not in log
+            if args.user_test:
+                log=debug.read_text()
+                assert 'USER TEST FAILED' not in log
+                marker=('ON.: USER TEST sustained ring-3 load ready.' if args.user_test==3 else
+                        'ON.: USER TEST fault containment, kernel survival, generations and full reclamation passed.' if args.user_test==1 else
+                        'ON.: USER TEST partial address-space allocation rollback, retry and reclamation passed.')
+                assert marker in log.splitlines() and marker in serial_lines()
+                if args.user_test==1:
+                    for name in ['kernel-read','kernel-write','kernel-execute','hhdm-read','page-table-write','foreign-frame-read','kernel-stack-read','code-write','stack-execute','lower-stack-guard','upper-stack-guard','unmapped-read','invalid-opcode','privileged-cli','port-io','kernel-gate','disabled-syscall','disabled-sysenter','unsupported-fpu','invalid-user-stack','divide-error']:
+                        assert 'ON.: USER TEST isolated fault passed: '+name in log.splitlines()
+                    assert 'ON.: USER TEST ring-3 entry, exit, distinct same-VA data, RX/RW-NX, guards, CR3 and timer preemption passed.' in log
+                print('Verified isolated ring-3 test mode '+str(args.user_test))
             if args.task_test:
                 log=debug.read_text()
                 assert 'TASK TEST FAILED' not in log and 'ERROR terminated task resumed' not in log
@@ -270,7 +283,7 @@ def main():
                     execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'});time.sleep(0.06)
                 time.sleep(0.2)
                 log=debug.read_text()
-                assert 'ON.: preemptive task diagnostics; user mode disabled.' in log
+                assert 'ON.: preemptive task diagnostics; isolated user execution available.' in log
                 assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log)
                 execute('screendump', {'filename':str(output/'task-diagnostics.png'),'format':'png'})
             if args.desktop_test or args.windows_test:
@@ -646,6 +659,12 @@ def main():
                 (output / (prefix + '-registers.log')).write_text(registers)
                 status = execute('query-status')
                 assert status['status'] == 'running', status  # QEMU is live; guest CPU is halted.
+            if args.user_test==3:
+                log=debug.read_text()
+                for name in ['user-load-a','user-load-b']:
+                    matches=re.findall(r'ON\.: task [0-9]+ '+name+r' ready dispatches=([0-9]+) cpu_ticks=([0-9]+)',log)
+                    assert matches and any(int(d)>1 and int(c)>0 for d,c in matches), name+' did not preempt during desktop interaction'
+                print('Verified desktop/input/themes/windows with two sustained preempted Ring 3 workers')
             execute('screendump', {'filename': str(screenshot), 'format': 'png'})
             if not screenshot.is_file() or screenshot.stat().st_size == 0:
                 raise RuntimeError('QEMU did not produce a screenshot')

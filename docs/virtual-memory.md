@@ -77,3 +77,12 @@ The normal ELF had no undefined symbols. Logs are in
 ## Kernel task stack mappings
 
 The preemptive scheduler maps per-task supervisor writable/NX stacks with unmapped guard pages in a separate high-half interval and releases them only from another context. All tasks still share this adopted CR3; guard pages and supervisor/NX leaves do not provide isolation between ring-0 tasks. See [multitasking](multitasking.md) for ownership, rollback tests and disabled user-process architecture.
+
+## Owned user roots
+
+The adopted boot-root APIs remain for kernel mappings. [User execution](user-mode.md)
+now uses separate, zeroed lower-half roots in `address_space.c`, owned user leaves,
+W^X enforcement and inactive-root mutation/destruction. Upper-half entries are
+shared supervisor-only and refreshed on dispatch. PGE is disabled and CR3 reloads
+flush translations; PCID/LA57 are unsupported. No boot low aliases enter a user
+root. These protections isolate CPL3 tasks; they do not isolate trusted CPL0 code.

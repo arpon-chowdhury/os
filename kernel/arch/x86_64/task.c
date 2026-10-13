@@ -1,6 +1,8 @@
 #include "task.h"
 #include "arch.h"
 #include "virtual.h"
+#include "address_space.h"
+#include "process.h"
 #define STACK_BASE UINT64_C(0xffffc80000000000)
 #define STACK_STRIDE ((TASK_STACK_PAGES+2u)*PMM_PAGE_SIZE)
 static uint64_t frames[TASK_MAX][TASK_STACK_PAGES];
@@ -60,10 +62,26 @@ bool arch_task_privilege_boundary(void) {
     __asm__ volatile ("sgdt %0" : "=m"(gdtr));
     __asm__ volatile ("sidt %0" : "=m"(idtr));
     __asm__ volatile ("mov %%cs,%0" : "=r"(cs));
-    if((lo&1) || cs!=8 || gdtr.limit!=39 || idtr.limit!=4095) return false;
+    if((lo&1) || cs!=8 || gdtr.limit!=55 || idtr.limit!=4095) return false;
+    uint64_t cr0,cr4;
+    __asm__ volatile ("mov %%cr0,%0" : "=r"(cr0));
+    __asm__ volatile ("mov %%cr4,%0" : "=r"(cr4));
+    if(!(cr0&8) || (cr4&((1ull<<16)|(1ull<<22)|(1ull<<24)))) return false;
+    uint32_t a,b,c,d;
+    __asm__ volatile ("cpuid" : "=a"(a),"=b"(b),"=c"(c),"=d"(d) : "a"(1),"c"(0));
+    if(d&(1u<<11)) {
+        __asm__ volatile ("rdmsr" : "=a"(lo),"=d"(hi) : "c"(0x174));
+        if(lo || hi) return false;
+    }
     const uint64_t *gdt=(const uint64_t *)(uintptr_t)gdtr.base;
     if(((gdt[1]>>45)&3) || ((gdt[2]>>45)&3) || ((gdt[3]>>45)&3)) return false;
+    if(((gdt[5]>>45)&3)!=3 || ((gdt[6]>>45)&3)!=3) return false;
     const uint8_t *idt=(const uint8_t *)(uintptr_t)idtr.base;
-    for(unsigned i=0;i<256;++i) if(idt[i*16+5]&0x60) return false;
+    for(unsigned i=0;i<256;++i) if((idt[i*16+5]&0x60)!=(i==128?0x60:0)) return false;
     return true;
+}
+
+void arch_task_activate(uint64_t root,uintptr_t stack_top) {
+    arch_address_activate(root);
+    arch_user_kernel_stack(stack_top);
 }

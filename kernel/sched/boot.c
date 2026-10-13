@@ -81,7 +81,7 @@ static void tests(void) {
     task_id fresh=task_create("generation",empty,0);require(fresh && fresh!=slots[0]);
     require(!task_terminate(slots[0]) && !task_snapshot(slots[0],&info));
     require(task_terminate(fresh));task_reap();require(count_is(1));require(memory_equal(before,pmm_get_statistics()));
-    require(!process_user_execution_enabled() && syscall_unavailable(0)==-ON_ENOSYS && arch_task_privilege_boundary());
+    require(process_user_execution_enabled() && syscall_unavailable(0)==-ON_ENOSYS && arch_task_privilege_boundary());
     struct vmm_translation kernel;
     require(vmm_translate((uintptr_t)tests,&kernel) && !(kernel.permissions&VMM_USER));
     arch_debug_puts("ON.: TASK TEST capacity, stale IDs, termination, supervisor/NX guards and disabled user entry passed.\n");
@@ -105,7 +105,7 @@ static void tests(void) {
 #endif
 void task_boot_start(void) {
     if(!task_init()) return;
-    arch_debug_puts("ON.: preemptive scheduler ready; foreground task; ring-3 and syscalls disabled.\n");
+    arch_debug_puts("ON.: preemptive scheduler ready; foreground task; isolated ring-3 available; SYSCALL disabled.\n");
 #if ON_TASK_TEST
     arch_interrupt_restore(0x200);
 #if ON_TASK_TEST == 1 || ON_TASK_TEST == 3
@@ -114,6 +114,7 @@ void task_boot_start(void) {
     require(task_create("guard-fault",guard_fault,0)!=0);task_yield();require(false);
 #endif
 #endif
+    process_boot_test();
     if(task_create("scheduler-monitor",maintenance,0)) arch_debug_puts("ON.: independent scheduler-monitor kernel task ready.\n");
     else arch_debug_puts("ON.: task stacks unavailable; foreground services retained.\n");
 }

@@ -139,7 +139,7 @@ void desktop_content(struct ui *u,int id) {
         graphics_text(g,x,y,"ON. / foreground desktop",1,u->tokens.ink);
         graphics_text(g,x,y+20,"Independent GUI windows",1,u->tokens.muted);
         graphics_text(g,x,y+40,"One GUI owner; kernel tasks",1,u->tokens.muted);
-        graphics_text(g,x,y+60,"Preemptive tasks; shared CR3",1,u->tokens.muted);
+        graphics_text(g,x,y+60,"Kernel tasks + isolated users",1,u->tokens.muted);
         if(s->bounds.h>=160) {
             graphics_text(g,x,y+84,"F6 switch / Shift-F6 previous",1,u->tokens.muted);
             graphics_text(g,x,y+104,"F7 min / F8 max / F9 close",1,u->tokens.muted);
@@ -214,6 +214,6 @@ void desktop_overlay(struct ui *u) {
     if(r.h>200) {
         graphics_text(g,r.x+16,r.y+184,"Flow / Pulse / Spaces / Studio: planned",1,u->tokens.muted);
         graphics_text(g,r.x+16,r.y+208,"Enter opens tool | Esc: terminal",1,u->tokens.muted);
-        graphics_text(g,r.x+16,r.y+232,"GUI windows; no user processes",1,u->tokens.muted);
+        graphics_text(g,r.x+16,r.y+232,"Built-in foreground tools",1,u->tokens.muted);
     }
 }

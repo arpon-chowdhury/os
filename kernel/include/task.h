@@ -16,6 +16,7 @@ struct task_info {
     char name[24];
     uintptr_t stack_base;
     uint64_t wake_tick, dispatches, cpu_ticks, idle_ticks;
+    uint64_t address_root;
 };
 /* Single bootstrap CPU, timer preemption; never call scheduling/lifecycle APIs
    from IRQs or while holding allocator/device locks.
@@ -24,6 +25,10 @@ bool task_init(void);
 /* Entry/argument are trusted and borrowed; callers own argument/resource
    lifetime through termination. Only task stacks are automatically reclaimed. */
 task_id task_create(const char *name, task_entry entry, void *argument);
+/* Trusted process service only: root and argument live until cleanup. */
+task_id task_create_isolated(const char *name, task_entry entry, void *argument,
+                             uint64_t root, void (*cleanup)(void *));
+bool task_current_user(void);
 task_id task_current(void);
 bool task_snapshot(task_id id, struct task_info *info);
 size_t task_list(struct task_info *info, size_t capacity);
@@ -46,4 +51,5 @@ void arch_task_stack_release(unsigned slot);
 bool arch_task_privilege_boundary(void);
 uintptr_t arch_task_context(uintptr_t base, void (*start)(void));
 void arch_task_switch(uintptr_t *old_stack, uintptr_t new_stack);
+void arch_task_activate(uint64_t root, uintptr_t kernel_stack_top);
 #endif

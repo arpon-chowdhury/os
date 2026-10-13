@@ -86,6 +86,26 @@ x86_exception_common:
     pushq %r13
     pushq %r14
     pushq %r15
+    /* Never suspend or abandon a task on the shared exception IST. Copy a
+       recoverable CPL3 frame to that task's private RSP0 before terminating. */
+    testb $3,144(%rsp)
+    jz 2f
+    cmpq $2,120(%rsp)
+    je 2f
+    cmpq $8,120(%rsp)
+    je 2f
+    cmpq $18,120(%rsp)
+    je 2f
+    movq %rsp,%rbx
+    andq $-16,%rsp
+    call x86_user_exception_stack
+    subq $176,%rax
+    movq %rax,%rdi
+    movq %rbx,%rsi
+    movq $22,%rcx
+    rep movsq
+    movq %rax,%rsp
+2:
     movq %rsp, %rdi
     movq %cr2, %rsi
     andq $-16, %rsp
