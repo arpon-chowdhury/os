@@ -53,6 +53,7 @@ void x86_irq_dispatch(const struct exception_frame *frame) {
     }
     if (irq >= 8) outb(PIC_SLAVE, 0x20);
     outb(PIC_MASTER, 0x20);
+    if (irq == 0) task_preempt();
 }
 
 static void timer_irq(const struct exception_frame *frame) {

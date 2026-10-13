@@ -153,7 +153,8 @@ def main():
                         ist=symbols['x86_exception_stacks']+3*16384
                         assert ist<=fields['handler_frame']<ist+16384
                 else:
-                    markers=(['ON.: TASK TEST real contexts, callee registers, stack locals, sleep, return/exit and reclamation passed.',
+                    markers=(['ON.: TASK TEST non-yielding workers and foreground timer preemption passed.',
+                              'ON.: TASK TEST real contexts, callee registers, stack locals, sleep, return/exit and reclamation passed.',
                               'ON.: TASK TEST capacity, stale IDs, termination, supervisor/NX guards and disabled user entry passed.'] if args.task_test==1 else
                              ['ON.: TASK TEST partial stack allocation rollback and retry passed.'])
                     for marker in markers: assert marker in log and marker in serial_lines()
@@ -269,7 +270,7 @@ def main():
                     execute('human-monitor-command', {'command-line':'sendkey '+key+' 20'});time.sleep(0.06)
                 time.sleep(0.2)
                 log=debug.read_text()
-                assert 'ON.: cooperative task diagnostics; user mode disabled.' in log
+                assert 'ON.: preemptive task diagnostics; user mode disabled.' in log
                 assert re.search(r'ON\.: task [0-9]+ scheduler-monitor sleeping dispatches=[1-9][0-9]*',log)
                 execute('screendump', {'filename':str(output/'task-diagnostics.png'),'format':'png'})
             if args.desktop_test or args.windows_test:

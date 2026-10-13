@@ -1,9 +1,9 @@
-# Cooperative kernel tasks
+# Preemptive kernel tasks
 
 This stage adds actual independent kernel execution contexts. GUI windows remain
 retained surfaces owned by the foreground task; creating a window does not create
-a task or process. Every kernel task runs at CPL0 in the shared boot CR3. There
-is no user-mode execution, process loader, private address space or preemption.
+a task or process. Every kernel task runs at CPL0 in the shared boot CR3. User-mode execution,
+process loading and private address spaces remain future work.
 
 ## Running behavior
 
@@ -15,12 +15,14 @@ application or invented desktop service. The foreground loop yields after each
 input/render batch, and sleeps with the existing atomic STI/HLT sequence.
 
 The scheduler chooses the next ready slot in round-robin order. Tasks explicitly
-call `task_yield`, `task_sleep` or return/`task_exit`. IRQ0 only increments ticks
-and accounting; it never switches contexts. Keyboard and mouse IRQ handlers
+call `task_yield`, `task_sleep` or return/`task_exit`. IRQ0 increments ticks and accounting. After PIC EOI, every five ticks
+(approximately 50 ms), its dispatch tail selects the next ready task. The saved
+IRQ frame remains on the interrupted task stack until that task resumes and
+returns through IRET. This preserves all general registers and interrupted flags. Keyboard and mouse IRQ handlers
 retain their existing queue-only role. No drawing, allocator calls or reclamation
-are performed from IRQ0. A task that never yields can starve other tasks, even
-though interrupts continue; there is no claim of timer preemption or hard
-real-time fairness.
+are performed from IRQ0. Non-yielding tasks with interrupts enabled are preempted. Interrupt-disabled
+critical sections defer preemption; this is not hard real-time scheduling.
+IRQ scheduling wakes sleepers and scans only eight fixed slots; it never reaps.
 
 Type `tasks` in the terminal for IDs, names, states, dispatch counts and CPU/idle
 sample counts. Debugcon/COM1 include the same scheduling diagnostics. CPU counts
@@ -127,7 +129,11 @@ callee-saved registers and local sentinels, IF restoration, sleep/wakeup, entry
 return/exit and complete PMM reclamation; a deliberate lower-guard write with
 expected page-fault frame/IST/halted CPU and task identity; partial allocation
 failure with exact PMM rollback and successful retry. Capacity and stale IDs are
-also exercised on the actual kernel. The privilege test inspects CPL0, DPL0 GDT/
+also exercised on the actual kernel. Mode 1 additionally runs two non-yielding
+workers while the bootstrap task busy-waits. An assembly worker sets and checks
+all fifteen general-purpose registers across timer suspension while waiting for
+its peer. Native tests check quantum boundaries, timer wakeup and deferred reap.
+The privilege test inspects CPL0, DPL0 GDT/
 IDT and disabled SYSCALL entry without entering user mode.
 
 The normal GUI regression checks also query `tasks` after desktop interactions
@@ -135,10 +141,10 @@ to confirm that the independent monitor ran while the foreground GUI remained
 responsive. Existing boot, exceptions, physical/virtual memory, heap, terminal,
 keyboard, mouse, graphics, desktop and window tests remain separate checks.
 No host settings, installations, physical disks or privileged host operations
-are needed. QEMU TCG x86-64 is the verified platform; real hardware, SMP, user
-processes and preemptive scheduling remain unverified/unimplemented.
+are needed. QEMU TCG x86-64 is the verified platform. Real hardware and SMP remain
+unverified; user processes remain unimplemented.
 
-## Recorded results — 2026-10-13
+## Historical cooperative-stage results — 2026-10-13
 
 Final controlled task verification exited 0: six QEMU boots, modes 1/2/3 under
 both BIOS and UEFI. Real x86 context/register/local-stack preservation, saved IF
@@ -175,3 +181,32 @@ An initial compile exposed a tag-name collision between the new task-state enum
 and the architecture's TSS structure. Renaming the enum resolved it; subsequent
 builds and checks passed. No host macOS settings, installations, physical disks
 or privileged host operations were changed.
+
+## Preemptive phase verification — 2026-10-13
+
+The preemptive scheduler uses the existing guarded stacks and fixed eight-slot
+scheduler table without adding heap allocations. IRQ0 dispatch acknowledges the
+PIC before switching; reclamation remains in explicit foreground scheduling and
+reap paths. Shared allocator/VMM mutations retain interrupt-disabled protection.
+Only the foreground task owns GUI/input/render state; kernel callers must protect
+shared mutable state and must not sleep/yield while holding locks. This remains a
+trusted ring-0 system, with no isolation between tasks and no FPU/SIMD context.
+Interrupt-disabled code can still delay input and scheduling.
+
+`make verify-tasks` exited 0 for all six BIOS/UEFI task cases. Non-yielding workers,
+bootstrap busy-wait progress, all fifteen general registers across timer switches,
+quantum policy, sleep/wakeup, lifecycle, guards and rollback passed. All ten native
+ASan/UBSan suites passed. The existing 54-check QEMU regression matrix also exited
+0: windows, desktop, UI, terminal, mouse, keyboard, graphics, framebuffer/fallback,
+BIOS/UEFI boot, paging, heap, physical memory and nine fatal exceptions.
+
+Logs are `build/preemption-verification.log`, `build/preemption-native.log`,
+`build/preemption-regressions.log` and `build/preemption-foundation.log`. Updated
+terminal/About labels use “Preemptive”; their final BIOS/UEFI GUI checks are logged
+in `build/preemption-final-gui.log`. Generated artifacts remain ignored.
+
+This completes the single-CPU QEMU scheduling phase only. Core Alpha is not yet
+release-ready. The next phase is owned user address spaces and privilege isolation;
+working syscalls/loaders, disk I/O, filesystem integrity, native applications and
+release stability work remain pending. No optional features or host macOS changes
+were made. Real hardware, SMP and latency guarantees remain unverified.

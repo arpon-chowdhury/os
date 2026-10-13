@@ -27,8 +27,8 @@ management allocates protected 4 KiB frames from the Limine map; see the
 [memory guide](docs/memory.md). Four-level x86-64 virtual memory provides translation,
 mapping, permissions, and TLB invalidation while preserving boot mappings; see the
 [virtual memory guide](docs/virtual-memory.md). The [kernel heap](docs/heap.md)
-provides safe allocation, alignment, coalescing, and statistics. Scheduling, keyboard input, other
-drivers, and user space are future work.
+provides safe allocation, alignment, coalescing, and statistics. Preemptive kernel tasks, PS/2 input and a retained desktop are implemented;
+user execution, storage and a filesystem remain future work.
 
 ## Build and run
 
@@ -270,7 +270,7 @@ Opaque surfaces are recomposited only within clipped dirty regions. Shared
 theme tokens apply to windows, buttons, dock and top bar. Auto adapts to local
 time supplied by a future clock service; the current demo explicitly falls back
 to Dark because configured local civil time is unavailable. The desktop can separately show guest RTC firmware time. No host settings are read or
-changed. The GUI remains a foreground owner; cooperative kernel tasks are now documented separately below.
+changed. The GUI remains a foreground owner; preemptive kernel tasks are now documented separately below.
 
 Run `make test-ui` for sanitized state/compositing checks and `make verify-ui`
 for BIOS/UEFI mouse, keyboard, palette and terminal-restoration tests.
@@ -280,4 +280,6 @@ Interactive shell: type `desktop` in the terminal. See [desktop controls and lim
 
 Independent foreground windows: see [window management](docs/window-management.md). Run `make test-windows` and `make verify-windows` for sanitizer and BIOS/UEFI lifecycle/geometry tests.
 
-Cooperative kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). User-mode processes, hardware syscalls and private address spaces remain disabled.
+Preemptive kernel tasks: type `tasks` for states and sampled CPU/idle diagnostics. Run `make test-tasks` and `make verify-tasks` for native policy and BIOS/UEFI context/guard/rollback checks. See [multitasking architecture and limits](docs/multitasking.md). User-mode processes, hardware syscalls and private address spaces remain disabled.
+
+Core Alpha work follows the [ordered release gates](docs/architecture.md#on-os-core-alpha-release-order). The current phase is preemptive kernel scheduling; optional features wait until the core is stable.

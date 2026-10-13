@@ -63,6 +63,20 @@ int main(void) {
     assert(syscall_unavailable(0)==-ON_ENOSYS);
     struct syscall_request request={.number=ON_SYS_WRITE,.arguments={UINT64_MAX,UINT64_MAX}};
     assert(syscall_unavailable(&request)==-ON_ENOSYS);
+    task_id preempted=task_create("preempted",entry,0);
+    uint64_t irq_flags=arch_interrupt_save(), released_before=releases;
+    for(unsigned i=0;i<TASK_QUANTUM_TICKS-1;++i) {task_preempt();assert(task_current()==boot);}
+    task_preempt();assert(task_current()==preempted && !enabled);
+    arch_interrupt_restore(irq_flags);
+    assert(task_sleep(2) && task_current()==boot);
+    ticks=2;irq_flags=arch_interrupt_save();
+    for(unsigned i=0;i<TASK_QUANTUM_TICKS;++i) task_preempt();
+    assert(task_current()==preempted && releases==released_before);
+    arch_interrupt_restore(irq_flags);task_yield();assert(task_current()==boot);
+    assert(task_terminate(preempted));irq_flags=arch_interrupt_save();
+    for(unsigned i=0;i<TASK_QUANTUM_TICKS;++i) task_preempt();
+    assert(releases==released_before);arch_interrupt_restore(irq_flags);
+    task_reap();assert(releases==released_before+1 && enabled);
     task_fault_report();assert(snapshot(boot).state==TASK_FAULTED);task_diagnostics();
     puts("Task policy, states, round-robin, sleep deadlines, termination/reap, generations, capacity, allocation failure, IF preservation, accounting and disabled process/syscall contracts passed.");
 }

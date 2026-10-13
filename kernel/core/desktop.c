@@ -139,7 +139,7 @@ void desktop_content(struct ui *u,int id) {
         graphics_text(g,x,y,"ON. / foreground desktop",1,u->tokens.ink);
         graphics_text(g,x,y+20,"Independent GUI windows",1,u->tokens.muted);
         graphics_text(g,x,y+40,"One GUI owner; kernel tasks",1,u->tokens.muted);
-        graphics_text(g,x,y+60,"Cooperative tasks; shared CR3",1,u->tokens.muted);
+        graphics_text(g,x,y+60,"Preemptive tasks; shared CR3",1,u->tokens.muted);
         if(s->bounds.h>=160) {
             graphics_text(g,x,y+84,"F6 switch / Shift-F6 previous",1,u->tokens.muted);
             graphics_text(g,x,y+104,"F7 min / F8 max / F9 close",1,u->tokens.muted);

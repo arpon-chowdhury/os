@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #define TASK_MAX 8u
+#define TASK_QUANTUM_TICKS 5u
 #define TASK_STACK_PAGES 4u
 #define TASK_STACK_BYTES (TASK_STACK_PAGES * 4096u)
 typedef uint32_t task_id;
@@ -16,8 +17,8 @@ struct task_info {
     uintptr_t stack_base;
     uint64_t wake_tick, dispatches, cpu_ticks, idle_ticks;
 };
-/* Single bootstrap CPU, cooperative only, never call scheduling/lifecycle APIs
-   from IRQs or while holding allocator/device locks. Tasks must yield regularly.
+/* Single bootstrap CPU, timer preemption; never call scheduling/lifecycle APIs
+   from IRQs or while holding allocator/device locks.
    IDs include generations; stale IDs cannot target a reused slot. */
 bool task_init(void);
 /* Entry/argument are trusted and borrowed; callers own argument/resource
@@ -33,6 +34,8 @@ bool task_sleep(uint64_t ticks);
 __attribute__((noreturn)) void task_exit(void);
 /* Bounded IRQ0 accounting only; never switches contexts. */
 void task_tick(void);
+/* IRQ0 tail only, interrupts disabled, after PIC EOI; no reclamation. */
+void task_preempt(void);
 void task_idle_mark(bool idle);
 void task_fault_report(void);
 void task_boot_start(void);

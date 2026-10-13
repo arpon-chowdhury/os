@@ -33,8 +33,30 @@ static void worker(void *argument) {
     require(local[0]==0x11110000+id && local[3]==0x44440000+id);
     ++completed[id];
 }
+volatile unsigned busy_started[2];
+static volatile unsigned busy_done[2];
+extern bool x86_task_preemption_register_test(void);
+static void busy(void *argument) {
+    unsigned id=(uintptr_t)argument;
+    volatile uint64_t sentinel=0xabcdef00+id;
+    busy_started[id]=1;
+    uint64_t deadline=arch_system_ticks()+100;
+    /* Neither worker yields: the other must run through timer preemption. */
+    if(id==0) require(x86_task_preemption_register_test());
+    while(!busy_started[1-id]) require(arch_system_ticks()<deadline);
+    uint64_t until=arch_system_ticks()+15;
+    while(arch_system_ticks()<until) require(sentinel==0xabcdef00+id);
+    busy_done[id]=1;
+}
 static void tests(void) {
     struct pmm_statistics before=pmm_get_statistics();
+    require(task_create("busy-a",busy,0) && task_create("busy-b",busy,(void *)1));
+    uint64_t deadline=arch_system_ticks()+200;
+    while(!(busy_done[0] && busy_done[1])) require(arch_system_ticks()<deadline);
+    /* Completion stores precede return, so allow both exits before reaping. */
+    while(!count_is(1)) {task_yield();task_reap();require(arch_system_ticks()<deadline);}
+    require(memory_equal(before,pmm_get_statistics()));
+    arch_debug_puts("ON.: TASK TEST non-yielding workers and foreground timer preemption passed.\n");
     task_id ids[3];struct task_info info;
     for(unsigned i=0;i<3;++i) {
         ids[i]=task_create(i==0?"worker-a":i==1?"worker-b":"worker-c",worker,(void *)(uintptr_t)i);require(ids[i]!=0);
@@ -83,7 +105,7 @@ static void tests(void) {
 #endif
 void task_boot_start(void) {
     if(!task_init()) return;
-    arch_debug_puts("ON.: cooperative scheduler ready; foreground task; ring-3 and syscalls disabled.\n");
+    arch_debug_puts("ON.: preemptive scheduler ready; foreground task; ring-3 and syscalls disabled.\n");
 #if ON_TASK_TEST
     arch_interrupt_restore(0x200);
 #if ON_TASK_TEST == 1 || ON_TASK_TEST == 3

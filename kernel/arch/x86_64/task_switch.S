@@ -70,4 +70,76 @@ x86_task_register_test:
     popq %rbp
     ret
 .size x86_task_register_test,.-x86_task_register_test
+
+/* Wait for a peer without C calls: verify every interrupted general register. */
+.global x86_task_preemption_register_test
+.type x86_task_preemption_register_test,@function
+x86_task_preemption_register_test:
+    pushq %rbp
+    pushq %rbx
+    pushq %r12
+    pushq %r13
+    pushq %r14
+    pushq %r15
+    movq $100, %rax
+    movq $101, %rcx
+    movq $102, %rdx
+    movq $103, %rbx
+    movq $104, %rbp
+    movq $105, %rsi
+    movq $106, %rdi
+    movq $107, %r8
+    movq $108, %r9
+    movq $109, %r10
+    movq $110, %r11
+    movq $111, %r12
+    movq $112, %r13
+    movq $113, %r14
+    movq $114, %r15
+4:
+    cmpl $0,busy_started+4(%rip)
+    je 4b
+    cmpq $100, %rax
+    jne 5f
+    cmpq $101, %rcx
+    jne 5f
+    cmpq $102, %rdx
+    jne 5f
+    cmpq $103, %rbx
+    jne 5f
+    cmpq $104, %rbp
+    jne 5f
+    cmpq $105, %rsi
+    jne 5f
+    cmpq $106, %rdi
+    jne 5f
+    cmpq $107, %r8
+    jne 5f
+    cmpq $108, %r9
+    jne 5f
+    cmpq $109, %r10
+    jne 5f
+    cmpq $110, %r11
+    jne 5f
+    cmpq $111, %r12
+    jne 5f
+    cmpq $112, %r13
+    jne 5f
+    cmpq $113, %r14
+    jne 5f
+    cmpq $114, %r15
+    jne 5f
+    movl $1,%eax
+    jmp 6f
+5:
+    xorl %eax,%eax
+6:
+    popq %r15
+    popq %r14
+    popq %r13
+    popq %r12
+    popq %rbx
+    popq %rbp
+    ret
+.size x86_task_preemption_register_test,.-x86_task_preemption_register_test
 #endif

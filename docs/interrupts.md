@@ -13,8 +13,8 @@ unmasking the PIC then leaves IRQ0 pending without waking the CPU. This is a
 single-CPU legacy-PC implementation, with no APIC/IOAPIC or SMP support.
 
 The cascaded 8259 PICs use 8086 mode with master vectors 32–39 and slave vectors
-40–47. All lines begin masked. Only IRQ0 is enabled at boot; keyboard IRQ1 and
-all other device IRQs stay masked. The cascade IRQ2 opens only when a slave
+40–47. All lines begin masked. IRQ0 is enabled during timer initialization; PS/2 setup later enables IRQ1
+and IRQ12 when the corresponding device initializes successfully. The cascade IRQ2 opens only when a slave
 handler is registered. PIC initialization writes include I/O waits.
 
 `irq_entry.S` supplies 16 stubs with synthetic error codes, saves all 15 general
@@ -38,8 +38,11 @@ PIT channel 0 uses mode 2, binary counting, and divisor 11932 from an input
 clock of approximately 1193182 Hz: approximately 100 Hz, not an exact wall clock.
 IRQ0 increments a volatile, naturally aligned `uint64_t` counter initialized
 to zero. `arch_system_ticks()` returns a native 64-bit snapshot on the bootstrap
-CPU. Unsigned arithmetic wraps modulo 2^64. There is no SMP synchronization,
-scheduler, keyboard input, timer callback queue, or wall-clock API.
+CPU. Unsigned arithmetic wraps modulo 2^64. There is no SMP synchronization or timer callback queue. IRQ0 also accounts
+for the current task. After PIC EOI, its dispatch tail can switch kernel tasks
+with a five-tick quantum; see [multitasking](multitasking.md). The saved IRQ
+frame remains on the interrupted task stack and resumes through IRET. IRQ
+scheduling never allocates, reaps stacks, renders or polls the UART.
 
 Serial/debugcon messages at thresholds 100 and 200 come from the foreground
 idle loop, keeping UART polling out of the IRQ handler. Logging stops after

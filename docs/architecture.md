@@ -78,7 +78,7 @@ preserves the existing target triple, ISO layout, and QEMU TCG workflow.
    tested (see [the exception guide](exceptions.md)); legacy PIC/PIT interrupts are
    implemented (see [the interrupt guide](interrupts.md)). Physical allocation is
    implemented (see [the memory guide](memory.md)); [virtual memory](virtual-memory.md) is implemented while context
-   switching is now implemented cooperatively for kernel tasks; see [multitasking](multitasking.md).
+   switching is now implemented with timer preemption for kernel tasks; see [multitasking](multitasking.md).
 3. **Develop PC services:** device discovery, console, storage, filesystems,
    processes, system calls, and user space. Define a supported hardware profile
    as drivers become available; x86-64 CPU support does not mean every PC works.
@@ -104,12 +104,40 @@ input. `graphics.c` provides clipped pixel/rectangle/line/text/clear operations,
 packing, pitch, and pointer-aware writes. A subsequent retained UI layer now composites opaque surfaces with focus,
 input routing and theme tokens; see [ui-foundation.md](ui-foundation.md). A foreground desktop/window manager now adds independent retained windows, resize
 and lifecycle controls, a dock, and a read-only guest RTC clock; see
-[window-management.md](window-management.md). Cooperative kernel tasks now run
-on separate stacks; filesystem services, preemption, user processes and process
+[window-management.md](window-management.md). Preemptive kernel tasks now run
+on separate stacks; filesystem services, user processes and process
 isolation remain future work. The current
 capability audit and future visual/interaction specification are in
 [gui-design.md](gui-design.md).
 
 ## Kernel task scheduling
 
-See [cooperative kernel tasks](multitasking.md). The single-CPU foreground GUI owns input/render state while a separate diagnostic task sleeps/yields on a guarded supervisor/NX stack. IRQs do not switch contexts. User descriptors, hardware syscall entry and process execution remain disabled; all kernel tasks share CR3.
+See [preemptive kernel tasks](multitasking.md). The single-CPU foreground GUI owns input/render state while a separate diagnostic task sleeps/yields on a guarded supervisor/NX stack. IRQ0 switches after PIC EOI with a five-tick quantum; IRQ scheduling never allocates or reaps. User descriptors, hardware syscall entry and process execution remain disabled; all kernel tasks share CR3.
+
+## ON. OS Core Alpha release order
+
+Complete and verify each phase before implementing the next. The current phase
+is preemptive kernel scheduling; see [verification](multitasking.md). Existing
+Windows 11 + macOS-inspired desktop, adaptive theme tokens and bottom dock stay
+in place. The graphical demo is not yet a usable Core Alpha release.
+
+1. Preemptive scheduler: bounded single-CPU policy, context preservation, sleep,
+   lifecycle, guards, rollback, responsive desktop and BIOS/UEFI regressions.
+2. User execution and memory isolation: owned address spaces, supervisor-only
+   kernel mappings, validated privilege transitions and isolated fault teardown.
+3. Working syscalls and application loading: bounded user copies, validated
+   executable images and resource ownership.
+4. Storage drivers and bounded disk I/O against disposable QEMU disk images.
+5. Reliable filesystem: validated metadata, safe operations, failure recovery
+   and integrity tests before writes become a release capability.
+6. Basic native application framework separated from kernel, drivers and services.
+7. Functional desktop, file manager and essential settings using those services.
+8. Performance, crash handling and stability testing for Core Alpha release.
+
+Security boundaries and filesystem integrity are release gates. Each phase
+requires relevant native tests and QEMU BIOS/UEFI verification, with limitations
+recorded explicitly. Prefer fixed/bounded storage, responsive queued input and
+dirty-region rendering. Do not change host macOS installations or settings.
+Wi-Fi/networking, audio/Bluetooth, advanced animations/customization, app store,
+package management, expanded hardware support and additional features stay
+behind Core Alpha stability. Architecture ports also remain later work.
